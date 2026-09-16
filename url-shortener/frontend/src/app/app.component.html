@@ -1,0 +1,182 @@
+<main class="page">
+  <header class="page__header">
+    <h1>URL Shortener</h1>
+    <p class="muted">Turn a long link into a short one, then watch the clicks add up.</p>
+  </header>
+
+  @if (error()) {
+    <div class="alert" role="alert">
+      <span>{{ error() }}</span>
+      <button type="button" class="alert__close" (click)="dismissError()" aria-label="Dismiss">&times;</button>
+    </div>
+  }
+
+  <section class="card">
+    <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      <div class="field">
+        <label for="url">Long URL</label>
+        <input
+          id="url"
+          type="url"
+          formControlName="url"
+          placeholder="https://example.com/a/very/long/path"
+          autocomplete="off"
+          [attr.aria-invalid]="showError('url')"
+        />
+        @if (showError('url')) {
+          <p class="field__error">Enter an absolute URL starting with http:// or https://</p>
+        }
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="customAlias">Custom alias <span class="muted">(optional)</span></label>
+          <input
+            id="customAlias"
+            type="text"
+            formControlName="customAlias"
+            placeholder="my-link"
+            autocomplete="off"
+            [attr.aria-invalid]="showError('customAlias')"
+          />
+          @if (showError('customAlias')) {
+            <p class="field__error">3-16 characters: letters, digits, '-' or '_'</p>
+          }
+        </div>
+
+        <div class="field">
+          <label for="expiresInDays">Expires in days <span class="muted">(optional)</span></label>
+          <input
+            id="expiresInDays"
+            type="number"
+            min="1"
+            max="3650"
+            formControlName="expiresInDays"
+            placeholder="never"
+            [attr.aria-invalid]="showError('expiresInDays')"
+          />
+          @if (showError('expiresInDays')) {
+            <p class="field__error">Between 1 and 3650 days</p>
+          }
+        </div>
+      </div>
+
+      <button type="submit" class="button" [disabled]="submitting()">
+        {{ submitting() ? 'Shortening...' : 'Shorten' }}
+      </button>
+    </form>
+  </section>
+
+  @if (created(); as link) {
+    <section class="card card--result">
+      <p class="muted">Your short link</p>
+      <div class="result">
+        <a [href]="link.shortUrl" target="_blank" rel="noopener noreferrer">{{ link.shortUrl }}</a>
+        <button type="button" class="button button--ghost" (click)="copy(link)">
+          {{ copiedCode() === link.shortCode ? 'Copied' : 'Copy' }}
+        </button>
+      </div>
+      <p class="muted result__target">&rarr; {{ link.longUrl }}</p>
+    </section>
+  }
+
+  <section class="card">
+    <div class="card__head">
+      <h2>Recent links</h2>
+      <button type="button" class="button button--ghost" (click)="refresh()" [disabled]="loading()">
+        {{ loading() ? 'Loading...' : 'Refresh' }}
+      </button>
+    </div>
+
+    @if (links().length === 0) {
+      <p class="muted">No links yet. Shorten one above to get started.</p>
+    } @else {
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Short</th>
+            <th scope="col">Target</th>
+            <th scope="col" class="numeric">Clicks</th>
+            <th scope="col">Created</th>
+            <th scope="col">Expires</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (link of links(); track link.shortCode) {
+            <tr>
+              <td>
+                <a [href]="link.shortUrl" target="_blank" rel="noopener noreferrer">/{{ link.shortCode }}</a>
+              </td>
+              <td class="truncate" [title]="link.longUrl">{{ link.longUrl }}</td>
+              <td class="numeric">{{ link.clickCount }}</td>
+              <td>{{ link.createdAt | date: 'short' }}</td>
+              <td>{{ link.expiresAt ? (link.expiresAt | date: 'short') : 'never' }}</td>
+              <td class="actions">
+                <button type="button" class="button button--ghost" (click)="copy(link)">
+                  {{ copiedCode() === link.shortCode ? 'Copied' : 'Copy' }}
+                </button>
+                <button type="button" class="button button--danger" (click)="remove(link)">Delete</button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+
+      <nav class="pager" aria-label="Recent links pagination">
+        <p class="muted" aria-live="polite">
+          {{ rangeStart() }}&ndash;{{ rangeEnd() }} of {{ totalItems() }}
+        </p>
+
+        <div class="pager__controls">
+          <label class="pager__size">
+            <span class="muted">Per page</span>
+            <select [value]="pageSize()" (change)="changePageSize($event)" [disabled]="loading()">
+              @for (option of pageSizeOptions; track option) {
+                <option [value]="option">{{ option }}</option>
+              }
+            </select>
+          </label>
+
+          <button
+            type="button"
+            class="button button--ghost"
+            (click)="goToFirst()"
+            [disabled]="!hasPrevious() || loading()"
+            aria-label="First page"
+          >
+            &laquo;
+          </button>
+          <button
+            type="button"
+            class="button button--ghost"
+            (click)="goToPrevious()"
+            [disabled]="!hasPrevious() || loading()"
+            aria-label="Previous page"
+          >
+            &lsaquo; Prev
+          </button>
+          <span class="pager__position">Page {{ page() + 1 }} of {{ pageCount() }}</span>
+          <button
+            type="button"
+            class="button button--ghost"
+            (click)="goToNext()"
+            [disabled]="!hasNext() || loading()"
+            aria-label="Next page"
+          >
+            Next &rsaquo;
+          </button>
+          <button
+            type="button"
+            class="button button--ghost"
+            (click)="goToLast()"
+            [disabled]="!hasNext() || loading()"
+            aria-label="Last page"
+          >
+            &raquo;
+          </button>
+        </div>
+      </nav>
+    }
+  </section>
+</main>
