@@ -9,7 +9,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 
+import com.example.urlshortener.model.UrlAuditEvent;
 import com.example.urlshortener.model.UrlMapping;
+import com.example.urlshortener.repository.UrlAuditRepository;
 import com.example.urlshortener.repository.UrlRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,9 +38,13 @@ class UrlControllerApiTest {
     @Autowired
     private UrlRepository repository;
 
+    @Autowired
+    private UrlAuditRepository auditRepository;
+
     @BeforeEach
     void resetDatabase() {
         repository.deleteAll();
+        auditRepository.deleteAll();
     }
 
     @Test
@@ -67,6 +73,10 @@ class UrlControllerApiTest {
         assertThat(json.get("shortCode").asText()).hasSize(7);
         assertThat(json.get("shortUrl").asText())
                 .isEqualTo("http://localhost:8080/" + json.get("shortCode").asText());
+        assertThat(auditRepository.findAll())
+            .singleElement()
+            .extracting(UrlAuditEvent::getAction, UrlAuditEvent::getUserId, UrlAuditEvent::getShortCode)
+            .containsExactly("CREATE", "admin", json.get("shortCode").asText());
     }
 
     @Test
@@ -230,6 +240,10 @@ class UrlControllerApiTest {
         mockMvc.perform(delete("/api/v1/urls/delete-me")
                 .with(httpBasic("admin", "change-me")))
             .andExpect(status().isNoContent());
+        assertThat(auditRepository.findAll())
+            .singleElement()
+            .extracting(UrlAuditEvent::getAction, UrlAuditEvent::getUserId, UrlAuditEvent::getShortCode)
+            .containsExactly("DELETE", "admin", "delete-me");
         mockMvc.perform(get("/api/v1/urls/delete-me")).andExpect(status().isNotFound());
         mockMvc.perform(delete("/api/v1/urls/delete-me")
                 .with(httpBasic("admin", "change-me")))

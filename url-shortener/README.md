@@ -33,7 +33,7 @@ flowchart TB
     workflow[WorkflowEngine<br/>DAG execution and rollback]
     repository[UrlRepository<br/>Spring Data JPA]
     cache[RedisUrlCache<br/>redirect target cache]
-    audit[UrlAuditLogger<br/>URL_ACTIVITY events]
+    audit[UrlAuditLogger<br/>persisted URL_ACTIVITY events]
     ledger[LineageLedger]
     telemetry[TelemetryRecorder]
     executor[Orchestration executor<br/>parallel channels]
@@ -43,6 +43,7 @@ flowchart TB
     direction LR
     h2[(H2 database<br/>source of truth)]
     redis[(Redis<br/>short-url:* keys)]
+    auditTable[(H2 url_audit_event table<br/>user_id, action, short_code)]
     logs[(Application logs)]
   end
 
@@ -60,6 +61,7 @@ flowchart TB
   urlService -->|lookup, populate, evict| cache
   cache --> redis
   urlService -->|successful create/delete| audit
+  audit --> auditTable
   audit --> logs
 
   orchestrationController --> workflow
@@ -69,9 +71,12 @@ flowchart TB
   workflow --> executor
 ```
 
-H2 remains authoritative for URL mappings and click counts. Redis only accelerates redirect target
- lookups; a Redis failure falls back to H2. The orchestration engine is independent in-process
- state, so its workflow, lineage, and telemetry are not shared across application replicas.
+H2 remains authoritative for URL mappings, click counts, and the `url_audit_event` table. Each
+successful create or delete persists the authenticated username as `user_id`, along with the
+action, short code, and timestamp; the same event is also written as a structured application log.
+Redis only accelerates redirect target lookups; a Redis failure falls back to H2. The orchestration
+engine is independent in-process state, so its workflow, lineage, and telemetry are not shared
+across application replicas.
 
 ## Running it
 
@@ -88,9 +93,9 @@ Cached entries expire with the link, and click counts are still written to H2 fo
 
 Creating and deleting links require HTTP Basic authentication. The local defaults are `admin` /
 `change-me`; override `app.auth.username` and `app.auth.password` before exposing the service. The
-backend writes a structured `URL_ACTIVITY` log entry after every successful create or delete,
-including the authenticated username and short code. Redirects and read-only analytics remain
-public.
+backend persists a `url_audit_event` row after every successful create or delete, including the
+authenticated username as `user_id`, the action, short code, and timestamp. It also writes a
+structured `URL_ACTIVITY` log entry. Redirects and read-only analytics remain public.
 
 Then the front end:
 
@@ -270,7 +275,7 @@ scenarios to validate before deploying it as a shared service:
 | Basic credentials and URLs can be exposed over an unencrypted connection or in browser/network logs. | HTTP works without certificates on a laptop. | Require HTTPS in non-local environments, mark credentials as sensitive in proxy/access-log configuration, and never log `Authorization` headers or passwords. |
 | Authentication failures can be brute-forced; the existing rate limiter covers `/api/**` but is not an auth-specific policy. | Shared throttling is simple and currently protects the API by client IP. | Add failed-login counters, exponential backoff or lockout, alerting, and tests that verify repeated `401` responses are throttled. |
 | Any authenticated user can currently delete any link. | There is one role and no ownership model. | Persist `createdBy`, authorize delete against the authenticated subject, and test cross-user delete as `403`. |
-| Audit records are ordinary application logs and are emitted after successful mutations. | No audit schema or extra storage is required. | Emit actor, action, code, request ID, result, and timestamp to centralized append-only storage; protect retention and alert on missing or malformed events. |
+| Audit records are persisted in H2 and mirrored to ordinary application logs after successful mutations. | The audit table is local to one in-memory H2 instance and does not provide durable, centralized retention. | Persist actor/user ID, action, code, request ID, result, and timestamp in durable append-only storage; protect retention and alert on missing or malformed events. |
 | A database delete can succeed while Redis eviction fails, leaving a stale redirect until its TTL expires. | Cache failure does not block the user operation. | Treat the database as authoritative, verify delete-then-redirect behavior with Redis available, and use bounded TTLs or a versioned cache key for stronger invalidation. |
 | Redis is unavailable or slow. | Redirects fall back to H2 and remain available, at the cost of latency. | Keep connect/command timeouts bounded, alert on fallback frequency, and load-test both Redis-hit and Redis-down paths. |
 | A target can point to phishing, malware, private, or loopback infrastructure. | Accepting all HTTP(S) URLs supports general-purpose shortening. | Add abuse screening, domain policy, DNS/IP validation, SSRF protections where applicable, takedown controls, and tests for loopback/private/link-local targets. |
