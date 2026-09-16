@@ -29,6 +29,12 @@ The backend uses Redis at `localhost:6379` to cache short-code redirects. Start 
 the cache, or run without it: Redis failures fall back to H2 so the application remains usable.
 Cached entries expire with the link, and click counts are still written to H2 for every redirect.
 
+Creating and deleting links require HTTP Basic authentication. The local defaults are `admin` /
+`change-me`; override `app.auth.username` and `app.auth.password` before exposing the service. The
+backend writes a structured `URL_ACTIVITY` log entry after every successful create or delete,
+including the authenticated username and short code. Redirects and read-only analytics remain
+public.
+
 Then the front end:
 
 ```
@@ -65,7 +71,7 @@ cd frontend && npm test      # 34 tests: vitest + HttpTestingController
 Create a link:
 
 ```
-curl -X POST http://localhost:8080/api/v1/shorten \
+curl -u admin:change-me -X POST http://localhost:8080/api/v1/shorten \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://example.com/a/very/long/path","customAlias":"demo","expiresInDays":30}'
 ```
@@ -158,7 +164,11 @@ All keys live in `backend/src/main/resources/application.properties`.
 | ---------------------------------- | ----------------------- | ---------------------------------------- |
 | `spring.data.redis.host`           | `localhost`             | Redis host for redirect caching          |
 | `spring.data.redis.port`           | `6379`                  | Redis port for redirect caching          |
+| `spring.data.redis.connect-timeout` | `500ms`                | Fast fallback when Redis is unavailable  |
+| `spring.data.redis.timeout`         | `500ms`                | Redis command timeout                   |
 | `app.base-url`                     | `http://localhost:8080` | Prefix for the returned `shortUrl`       |
+| `app.auth.username`                | `admin`                 | Basic-auth user for create/delete        |
+| `app.auth.password`                | `change-me`             | Basic-auth password; override in deploys |
 | `app.code-length`                  | `7`                     | Generated code width (4-10)              |
 | `app.max-code-attempts`            | `5`                     | Retries on a code collision              |
 | `app.allowed-origins`              | `http://localhost:4200` | CORS origins for `/api/**`               |
@@ -180,11 +190,48 @@ The defaults are tuned for running on a laptop. For anything public:
   replica enforces its own quota. Use Redis behind more than one instance.
 - **Fix the client-IP source.** `RateLimitFilter` trusts the first hop in `X-Forwarded-For`, which a
   caller can forge unless a known proxy sets it.
-- **Add authentication.** Every endpoint is open, including `DELETE`, so anyone can remove anyone's
-  link. There is no notion of an owner on `UrlMapping` yet.
+- **Replace the demo authentication.** The browser currently sends one shared Basic credential,
+  the backend keeps one in-memory user, and the password uses `{noop}` encoding. Use an external
+  identity provider or user store, hashed passwords, short-lived tokens, TLS, and per-user link
+  ownership before treating this as access control.
 - **Decide about untrusted targets.** Any public `http(s)` URL is accepted as-is, with no
   safe-browsing or malware check.
 - **Persist the orchestration state.** The engine and its ledger are in-memory singletons, so a
   restart loses the run and its audit trail, and a second replica would not share either. Real
   audit-grade lineage needs a durable store, and the approval gate needs authentication so the
   verification key means something.
+
+## Risks, trade-offs and guardrails
+
+The current design is deliberately small and useful for local development. These are the failure
+scenarios to validate before deploying it as a shared service:
+
+| Risk or failure scenario | Current trade-off | Required guardrail or validation |
+| ------------------------ | ----------------- | --------------------------------- |
+| The shared Basic credential is copied into browser JavaScript and can be reused by anyone who can use the UI. | Simple setup, but no individual identity or least privilege. | Use OIDC/OAuth2 or server-side sessions, remove credentials from the bundle, and enforce per-user ownership on create/delete. |
+| `app.auth.password` defaults to `change-me` and is configured with `{noop}` encoding. | Convenient local bootstrapping. | Fail startup when the default is used outside a `dev` profile; source secrets from a secret manager or environment, hash stored passwords, and rotate them. |
+| Basic credentials and URLs can be exposed over an unencrypted connection or in browser/network logs. | HTTP works without certificates on a laptop. | Require HTTPS in non-local environments, mark credentials as sensitive in proxy/access-log configuration, and never log `Authorization` headers or passwords. |
+| Authentication failures can be brute-forced; the existing rate limiter covers `/api/**` but is not an auth-specific policy. | Shared throttling is simple and currently protects the API by client IP. | Add failed-login counters, exponential backoff or lockout, alerting, and tests that verify repeated `401` responses are throttled. |
+| Any authenticated user can currently delete any link. | There is one role and no ownership model. | Persist `createdBy`, authorize delete against the authenticated subject, and test cross-user delete as `403`. |
+| Audit records are ordinary application logs and are emitted after successful mutations. | No audit schema or extra storage is required. | Emit actor, action, code, request ID, result, and timestamp to centralized append-only storage; protect retention and alert on missing or malformed events. |
+| A database delete can succeed while Redis eviction fails, leaving a stale redirect until its TTL expires. | Cache failure does not block the user operation. | Treat the database as authoritative, verify delete-then-redirect behavior with Redis available, and use bounded TTLs or a versioned cache key for stronger invalidation. |
+| Redis is unavailable or slow. | Redirects fall back to H2 and remain available, at the cost of latency. | Keep connect/command timeouts bounded, alert on fallback frequency, and load-test both Redis-hit and Redis-down paths. |
+| A target can point to phishing, malware, private, or loopback infrastructure. | Accepting all HTTP(S) URLs supports general-purpose shortening. | Add abuse screening, domain policy, DNS/IP validation, SSRF protections where applicable, takedown controls, and tests for loopback/private/link-local targets. |
+| Redirects are public and intentionally not rate-limited. | Link sharing remains frictionless and click counting stays simple. | Add abuse detection, per-code/IP quotas, concurrency limits, and monitoring for redirect floods without breaking normal sharing. |
+| H2 and in-memory orchestration/audit state lose data on restart and do not coordinate replicas. | Zero-dependency local development. | Use durable database migrations, externalized orchestration state, Redis or a queue for shared coordination, backups, and restart/replica recovery tests. |
+
+### Minimum release gate
+
+Before a non-local deployment, validate all of the following:
+
+- The default username/password is rejected by configuration validation or replaced through the
+  deployment secret mechanism.
+- HTTPS is enforced and no request or response log contains an `Authorization` value or password.
+- Anonymous create/delete requests return `401`; authenticated reads remain intentionally public.
+- A user cannot delete another user's link, and every successful mutation produces exactly one
+  centralized audit event with actor, action, code, timestamp, request ID, and outcome.
+- Invalid, expired, private-network, and policy-blocked targets are rejected before persistence.
+- Redis hit, Redis miss, Redis timeout, delete invalidation, database outage, and restart scenarios
+  have automated tests and observable alerts.
+- Rate limits, audit retention, backup/restore, secret rotation, and incident/takedown procedures
+  are documented and exercised.

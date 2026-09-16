@@ -9,6 +9,7 @@ import com.example.urlshortener.dto.UrlResponse;
 import com.example.urlshortener.exception.ApiException;
 import com.example.urlshortener.model.UrlMapping;
 import com.example.urlshortener.repository.UrlRepository;
+import com.example.urlshortener.security.UrlAuditLogger;
 import com.example.urlshortener.util.Base62Encoder;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -20,6 +21,8 @@ import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -36,12 +39,15 @@ public class UrlService {
     private final UrlRepository repository;
     private final AppProperties properties;
     private final RedisUrlCache urlCache;
+    private final UrlAuditLogger auditLogger;
     private final SecureRandom random = new SecureRandom();
 
-    public UrlService(UrlRepository repository, AppProperties properties, RedisUrlCache urlCache) {
+    public UrlService(
+            UrlRepository repository, AppProperties properties, RedisUrlCache urlCache, UrlAuditLogger auditLogger) {
         this.repository = repository;
         this.properties = properties;
         this.urlCache = urlCache;
+        this.auditLogger = auditLogger;
     }
 
     public UrlResponse shorten(ShortenRequest request) {
@@ -121,6 +127,7 @@ public class UrlService {
             throw ApiException.notFound("No link found for code " + shortCode);
         }
         urlCache.evict(shortCode);
+        auditLogger.deleted(currentUsername(), shortCode);
     }
 
     /**
@@ -133,7 +140,9 @@ public class UrlService {
         }
         try {
             UrlMapping saved = repository.saveAndFlush(mapping);
-            return UrlResponse.from(saved, properties.getBaseUrl());
+            UrlResponse response = UrlResponse.from(saved, properties.getBaseUrl());
+            auditLogger.created(currentUsername(), saved.getShortCode());
+            return response;
         } catch (DataIntegrityViolationException exception) {
             throw conflictFor(mapping.getShortCode(), aliasWasChosen);
         }
@@ -142,6 +151,11 @@ public class UrlService {
     private ApiException conflictFor(String shortCode, boolean aliasWasChosen) {
         return ApiException.conflict(
                 aliasWasChosen ? "Alias " + shortCode + " is already taken" : "Generated code collided");
+    }
+
+    private String currentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication == null ? "unknown" : authentication.getName();
     }
 
     private String generateCode() {

@@ -31,6 +31,7 @@ describe('UrlService', () => {
 
     const request = http.expectOne('/api/v1/shorten');
     expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('Authorization')).toBe(`Basic ${btoa('admin:change-me')}`);
     expect(request.request.body).toEqual({ url: 'https://example.com' });
     request.flush(link);
 
@@ -63,9 +64,11 @@ describe('UrlService', () => {
   });
 
   it('escapes the code when deleting', () => {
-    service.remove('a/b').subscribe();
+    service.remove('a/b', 'admin', 'change-me').subscribe();
 
-    http.expectOne('/api/v1/urls/a%2Fb').flush(null);
+    const request = http.expectOne('/api/v1/urls/a%2Fb');
+    expect(request.request.headers.get('Authorization')).toBe(`Basic ${btoa('admin:change-me')}`);
+    request.flush(null);
   });
 
   it('surfaces the API error message', () => {

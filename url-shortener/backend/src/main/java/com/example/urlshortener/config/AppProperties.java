@@ -28,6 +28,9 @@ public class AppProperties {
     private List<String> allowedOrigins = List.of("http://localhost:4200");
 
     @Valid
+    private final Auth auth = new Auth();
+
+    @Valid
     private final RateLimit rateLimit = new RateLimit();
 
     public String getBaseUrl() {
@@ -63,8 +66,37 @@ public class AppProperties {
         this.allowedOrigins = allowedOrigins;
     }
 
+    public Auth getAuth() {
+        return auth;
+    }
+
     public RateLimit getRateLimit() {
         return rateLimit;
+    }
+
+    public static class Auth {
+
+        @NotBlank
+        private String username = "admin";
+
+        @NotBlank
+        private String password = "change-me";
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
     }
 
     public static class RateLimit {

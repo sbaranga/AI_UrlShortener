@@ -142,6 +142,7 @@ describe('AppComponent dashboard', () => {
     flushList({ page: 1, size: 10 }, { items: [linkAt(10)], totalItems: 11 });
     expect(component.page()).toBe(1);
 
+    vi.spyOn(window, 'prompt').mockReturnValueOnce('admin').mockReturnValueOnce('change-me');
     component.remove(linkAt(10));
     http.expectOne('/api/v1/urls/code10').flush(null);
 

@@ -147,7 +147,16 @@ export class AppComponent {
   }
 
   remove(link: ShortLink): void {
-    this.urls.remove(link.shortCode).subscribe({
+    const username = window.prompt('Username required to delete this URL:');
+    if (username === null) {
+      return;
+    }
+    const password = window.prompt('Password required to delete this URL:');
+    if (password === null) {
+      return;
+    }
+
+    this.urls.remove(link.shortCode, username, password).subscribe({
       next: () => {
         if (this.created()?.shortCode === link.shortCode) {
           this.created.set(null);

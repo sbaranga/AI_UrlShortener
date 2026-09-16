@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 
 import com.example.urlshortener.model.UrlMapping;
 import com.example.urlshortener.repository.UrlRepository;
@@ -41,8 +42,17 @@ class UrlControllerApiTest {
     }
 
     @Test
+    void shortenRequiresAuthentication() throws Exception {
+        mockMvc.perform(post("/api/v1/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"https://example.com\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void shortenReturnsACreatedLink() throws Exception {
         String body = mockMvc.perform(post("/api/v1/shorten")
+                        .with(httpBasic("admin", "change-me"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://example.com/a/very/long/path?q=1\"}"))
                 .andExpect(status().isCreated())
@@ -62,6 +72,7 @@ class UrlControllerApiTest {
     @Test
     void shortenHonoursACustomAlias() throws Exception {
         mockMvc.perform(post("/api/v1/shorten")
+                        .with(httpBasic("admin", "change-me"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://example.com\",\"customAlias\":\"my-link\"}"))
                 .andExpect(status().isCreated())
@@ -74,6 +85,7 @@ class UrlControllerApiTest {
         createLink("https://example.com", "taken");
 
         mockMvc.perform(post("/api/v1/shorten")
+                        .with(httpBasic("admin", "change-me"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://other.example\",\"customAlias\":\"taken\"}"))
                 .andExpect(status().isConflict())
@@ -83,6 +95,7 @@ class UrlControllerApiTest {
     @Test
     void shortenRejectsAReservedAlias() throws Exception {
         mockMvc.perform(post("/api/v1/shorten")
+                        .with(httpBasic("admin", "change-me"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://example.com\",\"customAlias\":\"api\"}"))
                 .andExpect(status().isBadRequest());
@@ -91,6 +104,7 @@ class UrlControllerApiTest {
     @Test
     void shortenRejectsNonHttpSchemes() throws Exception {
         mockMvc.perform(post("/api/v1/shorten")
+                        .with(httpBasic("admin", "change-me"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"javascript:alert(1)\"}"))
                 .andExpect(status().isBadRequest())
@@ -99,7 +113,10 @@ class UrlControllerApiTest {
 
     @Test
     void shortenRejectsAMissingUrl() throws Exception {
-        mockMvc.perform(post("/api/v1/shorten").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        mockMvc.perform(post("/api/v1/shorten")
+                        .with(httpBasic("admin", "change-me"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.url").exists());
     }
@@ -210,13 +227,25 @@ class UrlControllerApiTest {
     void deleteRemovesTheLink() throws Exception {
         createLink("https://example.com", "delete-me");
 
-        mockMvc.perform(delete("/api/v1/urls/delete-me")).andExpect(status().isNoContent());
+        mockMvc.perform(delete("/api/v1/urls/delete-me")
+                .with(httpBasic("admin", "change-me")))
+            .andExpect(status().isNoContent());
         mockMvc.perform(get("/api/v1/urls/delete-me")).andExpect(status().isNotFound());
-        mockMvc.perform(delete("/api/v1/urls/delete-me")).andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/v1/urls/delete-me")
+                .with(httpBasic("admin", "change-me")))
+            .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void deleteRequiresAuthentication() throws Exception {
+        createLink("https://example.com", "protected");
+
+        mockMvc.perform(delete("/api/v1/urls/protected")).andExpect(status().isUnauthorized());
     }
 
     private void createLink(String url, String alias) throws Exception {
         mockMvc.perform(post("/api/v1/shorten")
+                        .with(httpBasic("admin", "change-me"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"" + url + "\",\"customAlias\":\"" + alias + "\"}"))
                 .andExpect(status().isCreated());
