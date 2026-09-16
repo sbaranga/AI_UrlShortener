@@ -49,7 +49,7 @@ flowchart TB
   browser --> proxy
   proxy --> limiter
   limiter --> security
-  browser -->|GET /{code}| urlController
+  browser -->|GET /:code| urlController
   security -->|public reads and redirects| urlController
   security -->|authenticated create/delete| urlController
   security -->|public orchestration API| orchestrationController
