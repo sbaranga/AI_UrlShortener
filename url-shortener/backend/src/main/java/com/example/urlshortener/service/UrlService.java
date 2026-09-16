@@ -1,5 +1,6 @@
 package com.example.urlshortener.service;
 
+import com.example.urlshortener.cache.RedisUrlCache;
 import com.example.urlshortener.config.AppProperties;
 import com.example.urlshortener.dto.AnalyticsSummary;
 import com.example.urlshortener.dto.PageResponse;
@@ -34,11 +35,13 @@ public class UrlService {
 
     private final UrlRepository repository;
     private final AppProperties properties;
+    private final RedisUrlCache urlCache;
     private final SecureRandom random = new SecureRandom();
 
-    public UrlService(UrlRepository repository, AppProperties properties) {
+    public UrlService(UrlRepository repository, AppProperties properties, RedisUrlCache urlCache) {
         this.repository = repository;
         this.properties = properties;
+        this.urlCache = urlCache;
     }
 
     public UrlResponse shorten(ShortenRequest request) {
@@ -66,6 +69,11 @@ public class UrlService {
     /** Resolves a code for redirection and counts the click. */
     @Transactional
     public String resolveTarget(String shortCode) {
+        String cachedTarget = urlCache.get(shortCode).orElse(null);
+        if (cachedTarget != null) {
+            repository.incrementClickCount(shortCode);
+            return cachedTarget;
+        }
         UrlMapping mapping = repository
                 .findByShortCode(shortCode)
                 .orElseThrow(() -> ApiException.notFound("No link found for code " + shortCode));
@@ -73,6 +81,7 @@ public class UrlService {
             throw ApiException.gone("Link " + shortCode + " has expired");
         }
         String target = mapping.getLongUrl();
+        urlCache.put(shortCode, target, mapping.getExpiresAt());
         repository.incrementClickCount(shortCode);
         return target;
     }
@@ -111,6 +120,7 @@ public class UrlService {
         if (repository.deleteByShortCode(shortCode) == 0) {
             throw ApiException.notFound("No link found for code " + shortCode);
         }
+        urlCache.evict(shortCode);
     }
 
     /**

@@ -25,6 +25,10 @@ cd backend
 mvn spring-boot:run          # http://localhost:8080
 ```
 
+The backend uses Redis at `localhost:6379` to cache short-code redirects. Start Redis locally for
+the cache, or run without it: Redis failures fall back to H2 so the application remains usable.
+Cached entries expire with the link, and click counts are still written to H2 for every redirect.
+
 Then the front end:
 
 ```
@@ -99,6 +103,8 @@ Errors come back as JSON with the matching status:
   vector.
 - **Clicks are counted with an UPDATE, not a read-modify-write**, so concurrent redirects do not
   lose increments.
+- **Redirect targets are cached in Redis** with the same lifetime as the link. Cache failures fall
+  back to H2, and cache hits still execute the click-count update.
 - **Redirects use `302` with `Cache-Control: no-store`** so browsers keep coming back through the
   service and clicks keep being counted.
 - **Rate limiting is a per-IP token bucket** over `/api/**` only; redirects are never limited.
@@ -150,6 +156,8 @@ All keys live in `backend/src/main/resources/application.properties`.
 
 | Key                                | Default                 | Notes                                    |
 | ---------------------------------- | ----------------------- | ---------------------------------------- |
+| `spring.data.redis.host`           | `localhost`             | Redis host for redirect caching          |
+| `spring.data.redis.port`           | `6379`                  | Redis port for redirect caching          |
 | `app.base-url`                     | `http://localhost:8080` | Prefix for the returned `shortUrl`       |
 | `app.code-length`                  | `7`                     | Generated code width (4-10)              |
 | `app.max-code-attempts`            | `5`                     | Retries on a code collision              |
