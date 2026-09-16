@@ -19,28 +19,30 @@ frontend/   Angular 22, standalone components and signals
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
   browser[Angular UI]
-  proxy[Angular dev proxy\n/api -> localhost:8080]
+  proxy[Angular dev proxy<br/>/api -> localhost:8080]
 
   subgraph app[Spring Boot application]
-    limiter[RateLimitFilter\n/api requests]
-    security[SecurityFilterChain\nHTTP Basic for create/delete]
-    urlController[UrlController\nshorten, analytics, stats, delete, redirect]
-    orchestrationController[OrchestrationController\n/governance API]
-    urlService[UrlService\nvalidation, expiry, click counting]
-    workflow[WorkflowEngine\nDAG execution and rollback]
-    repository[UrlRepository\nSpring Data JPA]
-    cache[RedisUrlCache\nredirect target cache]
-    audit[UrlAuditLogger\nURL_ACTIVITY events]
+    direction LR
+    limiter[RateLimitFilter<br/>/api requests]
+    security[SecurityFilterChain<br/>HTTP Basic for create/delete]
+    urlController[UrlController<br/>shorten, analytics, delete, redirect]
+    orchestrationController[OrchestrationController<br/>/governance API]
+    urlService[UrlService<br/>validation, expiry, click counting]
+    workflow[WorkflowEngine<br/>DAG execution and rollback]
+    repository[UrlRepository<br/>Spring Data JPA]
+    cache[RedisUrlCache<br/>redirect target cache]
+    audit[UrlAuditLogger<br/>URL_ACTIVITY events]
     ledger[LineageLedger]
     telemetry[TelemetryRecorder]
-    executor[Orchestration executor\nparallel channels]
+    executor[Orchestration executor<br/>parallel channels]
   end
 
   subgraph data[State and infrastructure]
-    h2[(H2 database\nsource of truth)]
-    redis[(Redis\nshort-url:* keys)]
+    direction LR
+    h2[(H2 database<br/>source of truth)]
+    redis[(Redis<br/>short-url:* keys)]
     logs[(Application logs)]
   end
 
@@ -49,7 +51,7 @@ flowchart LR
   limiter --> security
   browser -->|GET /{code}| urlController
   security -->|public reads and redirects| urlController
-  security -->|authenticated POST /shorten\nand DELETE /urls/{code}| urlController
+  security -->|authenticated create/delete| urlController
   security -->|public orchestration API| orchestrationController
 
   urlController --> urlService
