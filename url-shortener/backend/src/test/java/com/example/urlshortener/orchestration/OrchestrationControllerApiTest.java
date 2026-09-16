@@ -1,11 +1,13 @@
 package com.example.urlshortener.orchestration;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.urlshortener.repository.LineageEntryRepository;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,12 +36,16 @@ class OrchestrationControllerApiTest {
     @Autowired
     private MockMvc mockMvc;
 
+        @Autowired
+        private LineageEntryRepository lineageRepository;
+
         private MockHttpServletRequestBuilder command(String path) {
                 return post(path).with(httpBasic("admin", "change-me"));
         }
 
     @BeforeEach
     void resetEngine() throws Exception {
+                lineageRepository.deleteAll();
         mockMvc.perform(command(BASE + "/reset")).andExpect(status().isOk());
     }
 
@@ -79,6 +85,17 @@ class OrchestrationControllerApiTest {
         @Test
         void governanceCommandsRequireAuthentication() throws Exception {
                 mockMvc.perform(post(BASE + "/start")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void lineageEventsArePersistedInTheDatabase() throws Exception {
+                mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
+
+                assertThat(lineageRepository.findAllByOrderBySequenceNumberAsc())
+                                .anySatisfy(entry -> {
+                                        org.assertj.core.api.Assertions.assertThat(entry.getEvent()).isEqualTo("RUN_STARTED");
+                                        org.assertj.core.api.Assertions.assertThat(entry.getRunId()).isNotBlank();
+                                });
         }
 
     @Test

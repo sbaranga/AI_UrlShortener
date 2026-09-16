@@ -1,13 +1,17 @@
 package com.example.urlshortener.orchestration;
 
+import com.example.urlshortener.model.LineageEntryEntity;
 import com.example.urlshortener.orchestration.model.ModuleId;
 import com.example.urlshortener.orchestration.model.NodeState;
+import com.example.urlshortener.repository.LineageEntryRepository;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Append-only record of everything the engine did: what ran, when, how state changed and what
@@ -41,9 +45,21 @@ public class LineageLedger {
     private final Deque<LineageEntry> entries = new ArrayDeque<>();
     private final AtomicLong sequence = new AtomicLong();
     private final int capacity;
+    private final LineageEntryRepository repository;
 
+    /** Constructor used by the standalone workflow-engine tests. */
     public LineageLedger(OrchestrationProperties properties) {
         this.capacity = properties.getLedgerCapacity();
+        this.repository = null;
+    }
+
+    @Autowired
+    public LineageLedger(OrchestrationProperties properties, LineageEntryRepository repository) {
+        this.capacity = properties.getLedgerCapacity();
+        this.repository = repository;
+        List<LineageEntryEntity> stored = repository.findAllByOrderBySequenceNumberAsc();
+        stored.forEach(entry -> entries.addLast(fromEntity(entry)));
+        repository.findFirstByOrderBySequenceNumberDesc().ifPresent(entry -> sequence.set(entry.getSequenceNumber()));
     }
 
     /**
@@ -61,15 +77,21 @@ public class LineageLedger {
             String message) {
     }
 
-    public void record(
+    @Transactional
+    public synchronized void record(
             String runId, String event, ModuleId module, NodeState from, NodeState to, String message) {
         LineageEntry entry = new LineageEntry(
                 sequence.incrementAndGet(), Instant.now(), runId, event, module, from, to, message);
-        synchronized (entries) {
-            entries.addLast(entry);
-            while (entries.size() > capacity) {
-                entries.removeFirst();
+        if (repository != null) {
+            repository.save(new LineageEntryEntity(
+                    entry.seq(), entry.at(), entry.runId(), entry.event(), entry.module(), entry.from(), entry.to(), entry.message()));
+            while (repository.count() > capacity) {
+                repository.findFirstByOrderBySequenceNumberAsc().ifPresent(oldest -> repository.delete(oldest));
             }
+        }
+        entries.addLast(entry);
+        while (entries.size() > capacity) {
+            entries.removeFirst();
         }
     }
 
@@ -79,6 +101,9 @@ public class LineageLedger {
 
     /** Oldest first, which is the order the dashboard's ledger panel prints. */
     public List<LineageEntry> entries() {
+        if (repository != null) {
+            return repository.findAllByOrderBySequenceNumberAsc().stream().map(LineageLedger::fromEntity).toList();
+        }
         synchronized (entries) {
             return List.copyOf(entries);
         }
@@ -94,8 +119,23 @@ public class LineageLedger {
     }
 
     public void clear() {
+        if (repository != null) {
+            repository.deleteAll();
+        }
         synchronized (entries) {
             entries.clear();
         }
+    }
+
+    private static LineageEntry fromEntity(LineageEntryEntity entry) {
+        return new LineageEntry(
+                entry.getSequenceNumber(),
+                entry.getOccurredAt(),
+                entry.getRunId(),
+                entry.getEvent(),
+                entry.getModule(),
+                entry.getFromState(),
+                entry.getToState(),
+                entry.getMessage());
     }
 }
