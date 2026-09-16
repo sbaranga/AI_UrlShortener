@@ -16,6 +16,61 @@ backend/    Spring Boot 3.3 / Java 21 / H2 (in-memory)
 frontend/   Angular 22, standalone components and signals
 ```
 
+## Architecture
+
+```mermaid
+flowchart LR
+  browser[Angular UI]
+  proxy[Angular dev proxy\n/api -> localhost:8080]
+
+  subgraph app[Spring Boot application]
+    limiter[RateLimitFilter\n/api requests]
+    security[SecurityFilterChain\nHTTP Basic for create/delete]
+    urlController[UrlController\nshorten, analytics, stats, delete, redirect]
+    orchestrationController[OrchestrationController\n/governance API]
+    urlService[UrlService\nvalidation, expiry, click counting]
+    workflow[WorkflowEngine\nDAG execution and rollback]
+    repository[UrlRepository\nSpring Data JPA]
+    cache[RedisUrlCache\nredirect target cache]
+    audit[UrlAuditLogger\nURL_ACTIVITY events]
+    ledger[LineageLedger]
+    telemetry[TelemetryRecorder]
+    executor[Orchestration executor\nparallel channels]
+  end
+
+  subgraph data[State and infrastructure]
+    h2[(H2 database\nsource of truth)]
+    redis[(Redis\nshort-url:* keys)]
+    logs[(Application logs)]
+  end
+
+  browser --> proxy
+  proxy --> limiter
+  limiter --> security
+  browser -->|GET /{code}| urlController
+  security -->|public reads and redirects| urlController
+  security -->|authenticated POST /shorten\nand DELETE /urls/{code}| urlController
+  security -->|public orchestration API| orchestrationController
+
+  urlController --> urlService
+  urlService --> repository
+  repository --> h2
+  urlService -->|lookup, populate, evict| cache
+  cache --> redis
+  urlService -->|successful create/delete| audit
+  audit --> logs
+
+  orchestrationController --> workflow
+  orchestrationController --> ledger
+  workflow --> ledger
+  workflow --> telemetry
+  workflow --> executor
+```
+
+H2 remains authoritative for URL mappings and click counts. Redis only accelerates redirect target
+ lookups; a Redis failure falls back to H2. The orchestration engine is independent in-process
+ state, so its workflow, lineage, and telemetry are not shared across application replicas.
+
 ## Running it
 
 Two terminals. Backend first:
