@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.urlshortener.repository.LineageEntryRepository;
+import com.example.urlshortener.repository.TelemetryCounterRepository;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,9 @@ class OrchestrationControllerApiTest {
         @Autowired
         private LineageEntryRepository lineageRepository;
 
+        @Autowired
+        private TelemetryCounterRepository telemetryRepository;
+
         private MockHttpServletRequestBuilder command(String path) {
                 return post(path).with(httpBasic("admin", "change-me"));
         }
@@ -46,6 +50,7 @@ class OrchestrationControllerApiTest {
     @BeforeEach
     void resetEngine() throws Exception {
                 lineageRepository.deleteAll();
+                telemetryRepository.deleteAll();
         mockMvc.perform(command(BASE + "/reset")).andExpect(status().isOk());
     }
 
@@ -96,6 +101,17 @@ class OrchestrationControllerApiTest {
                                         org.assertj.core.api.Assertions.assertThat(entry.getEvent()).isEqualTo("RUN_STARTED");
                                         org.assertj.core.api.Assertions.assertThat(entry.getRunId()).isNotBlank();
                                 });
+        }
+
+        @Test
+        void telemetryCountersArePersistedInTheDatabase() throws Exception {
+                mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
+
+                assertThat(telemetryRepository.findAll()).isNotEmpty();
+                assertThat(telemetryRepository.findById(com.example.urlshortener.orchestration.model.ModuleId.REQUIREMENTS))
+                                .get()
+                                .extracting(counter -> counter.getAttempts())
+                                .isEqualTo(1L);
         }
 
     @Test

@@ -62,6 +62,14 @@ public class TelemetryCounter {
         return lastLatencyMs;
     }
 
+    public void restore(long attempts, long successes, long failures, long totalLatencyMs, long lastLatencyMs) {
+        this.attempts = attempts;
+        this.successes = successes;
+        this.failures = failures;
+        this.totalLatencyMs = totalLatencyMs;
+        this.lastLatencyMs = lastLatencyMs;
+    }
+
     public void recordAttempt() {
         attempts++;
     }

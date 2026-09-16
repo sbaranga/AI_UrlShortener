@@ -78,8 +78,9 @@ H2 remains authoritative for URL mappings, click counts, and the `url_audit_even
 successful create or delete persists the authenticated username as `user_id`, along with the
 action, short code, and timestamp; the same event is also written as a structured application log.
 Redis only accelerates redirect target lookups; a Redis failure falls back to H2. The orchestration
-engine workflow and telemetry are independent in-process state, while lineage is persisted in the
-H2 `lineage_entry` table; none of these states are shared across application replicas.
+engine workflow is independent in-process state, while lineage and telemetry are persisted in the
+H2 `lineage_entry` and `telemetry_counter` tables; the active workflow is not shared across
+application replicas.
 
 ## Running it
 
@@ -261,10 +262,10 @@ The defaults are tuned for running on a laptop. For anything public:
   ownership before treating this as access control.
 - **Decide about untrusted targets.** Any public `http(s)` URL is accepted as-is, with no
   safe-browsing or malware check.
-- **Persist the orchestration state.** The engine's active workflow and telemetry are in-memory,
-  so a restart loses the current run, while the sequence-numbered lineage is retained in the H2
-  `lineage_entry` table. A second replica still would not share the active workflow or telemetry;
-  real audit-grade lineage needs durable database migrations and the approval gate needs
+- **Persist the orchestration state.** The engine's active workflow is in-memory, so a restart
+  loses the current run, while sequence-numbered lineage and telemetry are retained in the H2
+  `lineage_entry` and `telemetry_counter` tables. A second replica still would not share the active
+  workflow; real audit-grade state needs durable database migrations and the approval gate needs
   authentication so the verification key means something.
 
 ## Risks, trade-offs and guardrails
@@ -284,7 +285,7 @@ scenarios to validate before deploying it as a shared service:
 | Redis is unavailable or slow. | Redirects fall back to H2 and remain available, at the cost of latency. | Keep connect/command timeouts bounded, alert on fallback frequency, and load-test both Redis-hit and Redis-down paths. |
 | A target can point to phishing, malware, private, or loopback infrastructure. | Accepting all HTTP(S) URLs supports general-purpose shortening. | Add abuse screening, domain policy, DNS/IP validation, SSRF protections where applicable, takedown controls, and tests for loopback/private/link-local targets. |
 | Redirects are public and intentionally not rate-limited. | Link sharing remains frictionless and click counting stays simple. | Add abuse detection, per-code/IP quotas, concurrency limits, and monitoring for redirect floods without breaking normal sharing. |
-| H2 and in-memory orchestration state lose data on restart and do not coordinate replicas; lineage is retained only in the local H2 instance. | Zero-dependency local development. | Use durable database migrations, externalized orchestration state, Redis or a queue for shared coordination, backups, and restart/replica recovery tests. |
+| H2 and in-memory active workflow state lose data on restart and do not coordinate replicas; lineage and telemetry are retained only in the local H2 instance. | Zero-dependency local development. | Use durable database migrations, externalized workflow state, Redis or a queue for shared coordination, backups, and restart/replica recovery tests. |
 
 ### Minimum release gate
 
