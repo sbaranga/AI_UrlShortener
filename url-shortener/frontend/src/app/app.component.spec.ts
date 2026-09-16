@@ -161,6 +161,7 @@ describe('AppComponent dashboard', () => {
     flushList({ page: 1, size: 10 }, { items: fullPage(10), totalItems: 25 });
 
     component.form.patchValue({ url: 'https://example.com/new' });
+    vi.spyOn(window, 'prompt').mockReturnValueOnce('admin').mockReturnValueOnce('change-me');
     component.submit();
     http.expectOne('/api/v1/shorten').flush(linkAt(99));
 

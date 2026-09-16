@@ -1,7 +1,6 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, catchError, throwError } from 'rxjs';
-import { API_PASSWORD, API_USERNAME } from './auth.config';
 
 export interface ShortLink {
   shortCode: string;
@@ -48,13 +47,12 @@ export class UrlService {
   /** Relative path: the dev server proxies /api through to the Spring Boot app (see proxy.conf.json). */
   private readonly api = '/api/v1';
   private readonly http = inject(HttpClient);
-  private readonly mutationHeaders = {
-    Authorization: `Basic ${btoa(`${API_USERNAME}:${API_PASSWORD}`)}`,
-  };
 
-  shorten(request: ShortenRequest): Observable<ShortLink> {
+  shorten(request: ShortenRequest, username: string, password: string): Observable<ShortLink> {
     return this.http
-      .post<ShortLink>(`${this.api}/shorten`, request, { headers: this.mutationHeaders })
+      .post<ShortLink>(`${this.api}/shorten`, request, {
+        headers: { Authorization: `Basic ${btoa(`${username}:${password}`)}` },
+      })
       .pipe(catchError(toReadableError));
   }
 

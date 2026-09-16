@@ -74,6 +74,14 @@ export class AppComponent {
       this.form.markAllAsTouched();
       return;
     }
+    const username = window.prompt('Username required to create this URL:');
+    if (username === null) {
+      return;
+    }
+    const password = window.prompt('Password required to create this URL:');
+    if (password === null) {
+      return;
+    }
     const { url, customAlias, expiresInDays } = this.form.getRawValue();
     this.submitting.set(true);
     this.error.set(null);
@@ -83,7 +91,7 @@ export class AppComponent {
         // Omit the optional fields entirely when unset; the API treats them as absent, not empty.
         ...(customAlias.trim() ? { customAlias: customAlias.trim() } : {}),
         ...(expiresInDays ? { expiresInDays: Number(expiresInDays) } : {}),
-      })
+      }, username, password)
       .subscribe({
         next: (link) => {
           this.created.set(link);

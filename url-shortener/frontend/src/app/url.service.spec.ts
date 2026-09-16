@@ -27,11 +27,11 @@ describe('UrlService', () => {
 
   it('posts the request body to /api/v1/shorten', () => {
     let result: ShortLink | undefined;
-    service.shorten({ url: 'https://example.com' }).subscribe((value) => (result = value));
+    service.shorten({ url: 'https://example.com' }, 'operator', 'secret').subscribe((value) => (result = value));
 
     const request = http.expectOne('/api/v1/shorten');
     expect(request.request.method).toBe('POST');
-    expect(request.request.headers.get('Authorization')).toBe(`Basic ${btoa('admin:change-me')}`);
+    expect(request.request.headers.get('Authorization')).toBe(`Basic ${btoa('operator:secret')}`);
     expect(request.request.body).toEqual({ url: 'https://example.com' });
     request.flush(link);
 
@@ -73,7 +73,7 @@ describe('UrlService', () => {
 
   it('surfaces the API error message', () => {
     let message: string | undefined;
-    service.shorten({ url: 'nope' }).subscribe({ error: (error: Error) => (message = error.message) });
+    service.shorten({ url: 'nope' }, 'admin', 'change-me').subscribe({ error: (error: Error) => (message = error.message) });
 
     http
       .expectOne('/api/v1/shorten')
@@ -84,7 +84,7 @@ describe('UrlService', () => {
 
   it('prefers a field error over the generic message', () => {
     let message: string | undefined;
-    service.shorten({ url: '' }).subscribe({ error: (error: Error) => (message = error.message) });
+    service.shorten({ url: '' }, 'admin', 'change-me').subscribe({ error: (error: Error) => (message = error.message) });
 
     http.expectOne('/api/v1/shorten').flush(
       {
