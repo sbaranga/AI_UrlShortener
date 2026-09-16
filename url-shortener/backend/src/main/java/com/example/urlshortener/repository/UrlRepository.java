@@ -1,6 +1,7 @@
 package com.example.urlshortener.repository;
 
 import com.example.urlshortener.model.UrlMapping;
+import java.time.Instant;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,6 +19,19 @@ public interface UrlRepository extends JpaRepository<UrlMapping, Long> {
 
     /** Id breaks ties so paging stays stable when two links share a createdAt timestamp. */
     Page<UrlMapping> findAllByOrderByCreatedAtDescIdDesc(Pageable pageable);
+
+    /** Clicks across every link, aggregated in the database rather than by loading the rows. */
+    @Query("select coalesce(sum(u.clickCount), 0) from UrlMapping u")
+    long sumClickCounts();
+
+    /**
+     * A null {@code expiresAt} never satisfies the comparison, so links that never expire are
+     * excluded rather than counted as expired.
+     */
+    long countByExpiresAtBefore(Instant now);
+
+    /** Busiest link for the dashboard; id breaks ties so the result is deterministic. */
+    Optional<UrlMapping> findFirstByOrderByClickCountDescIdDesc();
 
     /** Counts a click without loading the row, so concurrent redirects do not lose increments. */
     @Modifying

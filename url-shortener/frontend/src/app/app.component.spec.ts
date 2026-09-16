@@ -1,10 +1,11 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app.component';
-import { Page, ShortLink } from './url.service';
+import { AnalyticsSummary, Page, ShortLink } from './url.service';
 
-describe('AppComponent paging', () => {
+describe('AppComponent dashboard', () => {
   let fixture: ComponentFixture<AppComponent>;
   let component: AppComponent;
   let http: HttpTestingController;
@@ -17,9 +18,13 @@ describe('AppComponent paging', () => {
     clickCount: 0,
   });
 
-  /** Answers the pending GET /api/urls, asserting which page and size were asked for. */
+  const fullPage = (size: number) => Array.from({ length: size }, (_, index) => linkAt(index));
+
+  /** Answers the pending GET /api/v1/analytics, asserting which page and size were asked for. */
   function flushList(expected: { page: number; size: number }, body: Partial<Page<ShortLink>> = {}): void {
-    const request = http.expectOne((candidate) => candidate.url === '/api/urls' && candidate.method === 'GET');
+    const request = http.expectOne(
+      (candidate) => candidate.url === '/api/v1/analytics' && candidate.method === 'GET',
+    );
     expect(request.request.params.get('page')).toBe(String(expected.page));
     expect(request.request.params.get('size')).toBe(String(expected.size));
 
@@ -34,9 +39,26 @@ describe('AppComponent paging', () => {
     } satisfies Page<ShortLink>);
   }
 
-  const fullPage = (size: number) => Array.from({ length: size }, (_, index) => linkAt(index));
+  function flushSummary(body: Partial<AnalyticsSummary> = {}): void {
+    http.expectOne('/api/v1/analytics/summary').flush({
+      totalLinks: body.totalLinks ?? 0,
+      totalClicks: body.totalClicks ?? 0,
+      activeLinks: body.activeLinks ?? 0,
+      expiredLinks: body.expiredLinks ?? 0,
+      ...(body.mostClicked ? { mostClicked: body.mostClicked } : {}),
+    } satisfies AnalyticsSummary);
+  }
+
+  /** The initial load: the component asks for page 1 and the totals together. */
+  function flushInitialLoad(): void {
+    flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 25 });
+    flushSummary({ totalLinks: 25 });
+  }
 
   beforeEach(() => {
+    // Fake timers let the polling interval be driven deterministically; the component subscribes
+    // to it in its constructor, so they have to be installed before the component is created.
+    vi.useFakeTimers();
     TestBed.configureTestingModule({
       imports: [AppComponent],
       providers: [provideHttpClient(), provideHttpClientTesting()],
@@ -46,10 +68,14 @@ describe('AppComponent paging', () => {
     http = TestBed.inject(HttpTestingController);
   });
 
-  afterEach(() => http.verify());
+  afterEach(() => {
+    http.verify();
+    vi.useRealTimers();
+  });
 
-  it('requests the first page on load and reports the row range', () => {
+  it('requests the first page and the totals on load', () => {
     flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 25 });
+    flushSummary({ totalLinks: 25, totalClicks: 9, activeLinks: 24, expiredLinks: 1 });
 
     expect(component.page()).toBe(0);
     expect(component.pageCount()).toBe(3);
@@ -57,10 +83,12 @@ describe('AppComponent paging', () => {
     expect(component.rangeEnd()).toBe(10);
     expect(component.hasPrevious()).toBe(false);
     expect(component.hasNext()).toBe(true);
+    expect(component.summary()?.totalClicks).toBe(9);
+    expect(component.lastUpdated()).not.toBeNull();
   });
 
   it('walks forward and back through the pages', () => {
-    flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 25 });
+    flushInitialLoad();
 
     component.goToNext();
     flushList({ page: 1, size: 10 }, { items: fullPage(10), totalItems: 25 });
@@ -84,7 +112,7 @@ describe('AppComponent paging', () => {
   });
 
   it('does not request a page outside the range', () => {
-    flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 25 });
+    flushInitialLoad();
 
     component.goToPrevious();
     component.goToPage(3);
@@ -95,7 +123,7 @@ describe('AppComponent paging', () => {
   });
 
   it('restarts at the first page when the page size changes', () => {
-    flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 25 });
+    flushInitialLoad();
     component.goToNext();
     flushList({ page: 1, size: 10 }, { items: fullPage(10), totalItems: 25 });
 
@@ -109,31 +137,73 @@ describe('AppComponent paging', () => {
 
   it('steps back when the current page no longer exists after a delete', () => {
     flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 11 });
+    flushSummary({ totalLinks: 11 });
     component.goToNext();
     flushList({ page: 1, size: 10 }, { items: [linkAt(10)], totalItems: 11 });
     expect(component.page()).toBe(1);
 
     component.remove(linkAt(10));
-    http.expectOne('/api/urls/code10').flush(null);
+    http.expectOne('/api/v1/urls/code10').flush(null);
 
-    // The refresh lands on an empty page 1, so the component retries the last real page.
+    // The refresh lands on an empty page 2, so the component retries the last page with rows.
     flushList({ page: 1, size: 10 }, { items: [], totalItems: 10, totalPages: 1 });
     flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 10 });
+    flushSummary({ totalLinks: 10 });
 
     expect(component.page()).toBe(0);
     expect(component.links().length).toBe(10);
   });
 
   it('jumps to the first page after creating a link', () => {
-    flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 25 });
+    flushInitialLoad();
     component.goToNext();
     flushList({ page: 1, size: 10 }, { items: fullPage(10), totalItems: 25 });
 
     component.form.patchValue({ url: 'https://example.com/new' });
     component.submit();
-    http.expectOne((candidate) => candidate.method === 'POST').flush(linkAt(99));
+    http.expectOne('/api/v1/shorten').flush(linkAt(99));
 
     flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 26 });
+    flushSummary({ totalLinks: 26 });
     expect(component.page()).toBe(0);
+  });
+
+  it('re-reads the current page and the totals on each poll', () => {
+    flushInitialLoad();
+    component.goToNext();
+    flushList({ page: 1, size: 10 }, { items: fullPage(10), totalItems: 25 });
+
+    vi.advanceTimersByTime(AppComponent.POLL_INTERVAL_MS);
+
+    // The poll stays on the page the user is looking at.
+    flushList({ page: 1, size: 10 }, { items: fullPage(10), totalItems: 26 });
+    flushSummary({ totalLinks: 26, totalClicks: 4 });
+
+    expect(component.page()).toBe(1);
+    expect(component.totalItems()).toBe(26);
+    expect(component.summary()?.totalClicks).toBe(4);
+    // A background poll must not put the Refresh button into its loading state.
+    expect(component.loading()).toBe(false);
+  });
+
+  it('stops polling while live updates are switched off', () => {
+    flushInitialLoad();
+
+    component.toggleLiveUpdates();
+    expect(component.liveUpdates()).toBe(false);
+
+    vi.advanceTimersByTime(AppComponent.POLL_INTERVAL_MS * 3);
+    // http.verify() in afterEach fails if a poll fired.
+  });
+
+  it('refreshes immediately when live updates are switched back on', () => {
+    flushInitialLoad();
+    component.toggleLiveUpdates();
+
+    component.toggleLiveUpdates();
+
+    expect(component.liveUpdates()).toBe(true);
+    flushList({ page: 0, size: 10 }, { items: fullPage(10), totalItems: 25 });
+    flushSummary({ totalLinks: 25 });
   });
 });

@@ -25,6 +25,15 @@ export interface Page<T> {
   totalPages: number;
 }
 
+/** Totals across every link, not just the page currently on screen. */
+export interface AnalyticsSummary {
+  totalLinks: number;
+  totalClicks: number;
+  activeLinks: number;
+  expiredLinks: number;
+  mostClicked?: ShortLink;
+}
+
 /** Shape of the backend's error body (see ApiError on the Java side). */
 interface ApiError {
   status: number;
@@ -36,34 +45,40 @@ interface ApiError {
 @Injectable({ providedIn: 'root' })
 export class UrlService {
   /** Relative path: the dev server proxies /api through to the Spring Boot app (see proxy.conf.json). */
-  private readonly endpoint = '/api/urls';
+  private readonly api = '/api/v1';
   private readonly http = inject(HttpClient);
 
   shorten(request: ShortenRequest): Observable<ShortLink> {
-    return this.http.post<ShortLink>(this.endpoint, request).pipe(catchError(toReadableError));
+    return this.http.post<ShortLink>(`${this.api}/shorten`, request).pipe(catchError(toReadableError));
   }
 
   list(page = 0, size = 20): Observable<Page<ShortLink>> {
     return this.http
-      .get<Page<ShortLink>>(this.endpoint, { params: { page, size } })
+      .get<Page<ShortLink>>(`${this.api}/analytics`, { params: { page, size } })
+      .pipe(catchError(toReadableError));
+  }
+
+  summary(): Observable<AnalyticsSummary> {
+    return this.http
+      .get<AnalyticsSummary>(`${this.api}/analytics/summary`)
       .pipe(catchError(toReadableError));
   }
 
   stats(shortCode: string): Observable<ShortLink> {
     return this.http
-      .get<ShortLink>(`${this.endpoint}/${encodeURIComponent(shortCode)}`)
+      .get<ShortLink>(`${this.api}/urls/${encodeURIComponent(shortCode)}`)
       .pipe(catchError(toReadableError));
   }
 
   remove(shortCode: string): Observable<void> {
     return this.http
-      .delete<void>(`${this.endpoint}/${encodeURIComponent(shortCode)}`)
+      .delete<void>(`${this.api}/urls/${encodeURIComponent(shortCode)}`)
       .pipe(catchError(toReadableError));
   }
 }
 
 /** Turns an HttpErrorResponse into an Error whose message is worth showing to a user. */
-function toReadableError(response: HttpErrorResponse): Observable<never> {
+export function toReadableError(response: HttpErrorResponse): Observable<never> {
   if (response.status === 0) {
     return throwError(() => new Error('Cannot reach the server. Is the backend running on port 8080?'));
   }

@@ -1,7 +1,9 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { ShortLink, UrlService } from './url.service';
+import { interval } from 'rxjs';
+import { AnalyticsSummary, ShortLink, UrlService } from './url.service';
 
 @Component({
   selector: 'app-root',
@@ -18,6 +20,12 @@ export class AppComponent {
 
   /** All within the backend's 1..100 page-size bounds, so the server never clamps our choice. */
   readonly pageSizeOptions = [10, 20, 50, 100] as const;
+
+  /**
+   * How often the dashboard re-reads the analytics while live updates are on. Each tick costs two
+   * requests, so this is kept well inside the backend's per-IP rate limit.
+   */
+  static readonly POLL_INTERVAL_MS = 10_000;
 
   readonly form = this.formBuilder.group({
     url: ['', [Validators.required, Validators.pattern(/^https?:\/\/\S+$/i)]],
@@ -36,6 +44,10 @@ export class AppComponent {
   readonly totalItems = signal(0);
   readonly loading = signal(false);
 
+  readonly summary = signal<AnalyticsSummary | null>(null);
+  readonly liveUpdates = signal(true);
+  readonly lastUpdated = signal<Date | null>(null);
+
   /** At least one page, so the UI reads "Page 1 of 1" rather than "of 0" when there is nothing yet. */
   readonly pageCount = computed(() => Math.max(1, Math.ceil(this.totalItems() / this.pageSize())));
   readonly hasPrevious = computed(() => this.page() > 0);
@@ -46,6 +58,15 @@ export class AppComponent {
 
   constructor() {
     this.refresh();
+    interval(AppComponent.POLL_INTERVAL_MS)
+      .pipe(takeUntilDestroyed())
+      .subscribe(() => {
+        // Skip the tick when paused, or when a request is already in flight, so a slow backend
+        // cannot build up a queue of overlapping polls.
+        if (this.liveUpdates() && !this.loading()) {
+          this.reload({ silent: true });
+        }
+      });
   }
 
   submit(): void {
@@ -70,6 +91,7 @@ export class AppComponent {
           this.submitting.set(false);
           // Newest links sort first, so the one just created lives on page 1.
           this.load(0);
+          this.loadSummary();
         },
         error: (err: Error) => {
           this.error.set(err.message);
@@ -79,7 +101,16 @@ export class AppComponent {
   }
 
   refresh(): void {
-    this.load(this.page());
+    this.reload({ silent: false });
+  }
+
+  toggleLiveUpdates(): void {
+    const enabled = !this.liveUpdates();
+    this.liveUpdates.set(enabled);
+    // Turning it back on should show current figures rather than waiting out the interval.
+    if (enabled) {
+      this.reload({ silent: true });
+    }
   }
 
   goToPage(page: number): void {
@@ -127,15 +158,37 @@ export class AppComponent {
     });
   }
 
-  private load(requestedPage: number): void {
-    this.loading.set(true);
+  /** Re-reads both the current page and the totals, which is what "refresh" means to a user. */
+  private reload(options: { silent: boolean }): void {
+    this.load(this.page(), options);
+    this.loadSummary();
+  }
+
+  private loadSummary(): void {
+    this.urls.summary().subscribe({
+      next: (summary) => {
+        this.summary.set(summary);
+        this.lastUpdated.set(new Date());
+      },
+      error: (err: Error) => this.error.set(err.message),
+    });
+  }
+
+  /**
+   * Fetches one page of links. A silent load is a background poll: it must not flip the button
+   * into its loading state, or the dashboard would flicker every interval.
+   */
+  private load(requestedPage: number, options: { silent: boolean } = { silent: false }): void {
+    if (!options.silent) {
+      this.loading.set(true);
+    }
     this.urls.list(requestedPage, this.pageSize()).subscribe({
       next: (result) => {
         // Deleting the last row of the last page (or another client doing so) leaves the requested
         // page past the end; fall back to the last page that still has rows.
         const lastPage = Math.max(0, result.totalPages - 1);
         if (result.items.length === 0 && result.page > lastPage) {
-          this.load(lastPage);
+          this.load(lastPage, options);
           return;
         }
         this.links.set(result.items);

@@ -1,5 +1,6 @@
 package com.example.urlshortener.controller;
 
+import com.example.urlshortener.dto.AnalyticsSummary;
 import com.example.urlshortener.dto.PageResponse;
 import com.example.urlshortener.dto.ShortenRequest;
 import com.example.urlshortener.dto.UrlResponse;
@@ -25,6 +26,9 @@ public class UrlController {
     /** Same character set and length bounds the service enforces for aliases. */
     private static final String CODE_PATTERN = "[A-Za-z0-9_-]{3,16}";
 
+    /** Versioned prefix, so a future breaking change can ship alongside as /api/v2. */
+    private static final String API = "/api/v1";
+
     private static final int MAX_PAGE_SIZE = 100;
 
     private final UrlService urlService;
@@ -33,26 +37,36 @@ public class UrlController {
         this.urlService = urlService;
     }
 
-    @PostMapping("/api/urls")
+    @PostMapping(API + "/shorten")
     @ResponseStatus(HttpStatus.CREATED)
     public UrlResponse shorten(@Valid @RequestBody ShortenRequest request) {
         return urlService.shorten(request);
     }
 
-    @GetMapping("/api/urls")
-    public PageResponse<UrlResponse> list(
+    /**
+     * Tracked mappings for the dashboard, newest first. Paged rather than returning the whole
+     * table, so the response stays bounded as the number of links grows.
+     */
+    @GetMapping(API + "/analytics")
+    public PageResponse<UrlResponse> analytics(
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         int safePage = Math.max(0, page);
         int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
         return urlService.list(PageRequest.of(safePage, safeSize));
     }
 
-    @GetMapping("/api/urls/{shortCode}")
+    /** Totals over every link, which a single page of {@code /analytics} cannot show. */
+    @GetMapping(API + "/analytics/summary")
+    public AnalyticsSummary summary() {
+        return urlService.summary();
+    }
+
+    @GetMapping(API + "/urls/{shortCode}")
     public UrlResponse stats(@PathVariable String shortCode) {
         return urlService.stats(shortCode);
     }
 
-    @DeleteMapping("/api/urls/{shortCode}")
+    @DeleteMapping(API + "/urls/{shortCode}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String shortCode) {
         urlService.delete(shortCode);

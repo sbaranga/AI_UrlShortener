@@ -80,6 +80,50 @@
     </section>
   }
 
+  @if (summary(); as totals) {
+    <section class="card">
+      <div class="card__head">
+        <h2>Analytics</h2>
+        <div class="live">
+          @if (lastUpdated(); as updated) {
+            <span class="muted">Updated {{ updated | date: 'mediumTime' }}</span>
+          }
+          <label class="live__toggle">
+            <input type="checkbox" [checked]="liveUpdates()" (change)="toggleLiveUpdates()" />
+            Live
+          </label>
+        </div>
+      </div>
+
+      <dl class="stats">
+        <div class="stat">
+          <dt>Links</dt>
+          <dd>{{ totals.totalLinks }}</dd>
+        </div>
+        <div class="stat">
+          <dt>Total clicks</dt>
+          <dd>{{ totals.totalClicks }}</dd>
+        </div>
+        <div class="stat">
+          <dt>Active</dt>
+          <dd>{{ totals.activeLinks }}</dd>
+        </div>
+        <div class="stat">
+          <dt>Expired</dt>
+          <dd>{{ totals.expiredLinks }}</dd>
+        </div>
+      </dl>
+
+      @if (totals.mostClicked; as top) {
+        <p class="muted stats__top">
+          Busiest:
+          <a [href]="top.shortUrl" target="_blank" rel="noopener noreferrer">/{{ top.shortCode }}</a>
+          with {{ top.clickCount }} {{ top.clickCount === 1 ? 'click' : 'clicks' }}
+        </p>
+      }
+    </section>
+  }
+
   <section class="card">
     <div class="card__head">
       <h2>Recent links</h2>

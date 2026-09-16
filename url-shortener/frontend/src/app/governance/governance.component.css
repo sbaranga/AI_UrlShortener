@@ -1,0 +1,480 @@
+/*
+ * State colours are defined as a surface/border/text triple per state so a cell reads correctly in
+ * both the light and dark schemes the app supports, rather than hard-coding one background.
+ */
+:host {
+  --state-pending-surface: #f1f2f4;
+  --state-pending-border: #c8cbd2;
+  --state-pending-text: #4a4d55;
+
+  --state-running-surface: #e6eeff;
+  --state-running-border: #2f5bd7;
+  --state-running-text: #1c3f9f;
+
+  --state-completed-surface: #e4f5ea;
+  --state-completed-border: #1f8a4c;
+  --state-completed-text: #146436;
+
+  --state-approval-surface: #fdf3e0;
+  --state-approval-border: #b8791b;
+  --state-approval-text: #8a5a12;
+
+  --state-failed-surface: #fdeceb;
+  --state-failed-border: #b4232a;
+  --state-failed-text: #8d1c22;
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    --state-pending-surface: #23252b;
+    --state-pending-border: #3f434d;
+    --state-pending-text: #a8abb3;
+
+    --state-running-surface: #1b2740;
+    --state-running-border: #7ea2ff;
+    --state-running-text: #a8c1ff;
+
+    --state-completed-surface: #16291d;
+    --state-completed-border: #4cb87a;
+    --state-completed-text: #86d8a5;
+
+    --state-approval-surface: #2c2312;
+    --state-approval-border: #d9a13f;
+    --state-approval-text: #e8c384;
+
+    --state-failed-surface: #2a1c1d;
+    --state-failed-border: #ef8a8a;
+    --state-failed-text: #f2a9a9;
+  }
+}
+
+.room {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+.room__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.room__header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+}
+
+.room__run {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.muted {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.live::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.375rem;
+  border-radius: 50%;
+  background: var(--state-running-border);
+}
+
+.pill {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--state-pending-border);
+  background: var(--state-pending-surface);
+  color: var(--state-pending-text);
+}
+
+.pill[data-status='RUNNING'] {
+  border-color: var(--state-running-border);
+  background: var(--state-running-surface);
+  color: var(--state-running-text);
+}
+
+.pill[data-status='COMPLETED'] {
+  border-color: var(--state-completed-border);
+  background: var(--state-completed-surface);
+  color: var(--state-completed-text);
+}
+
+.pill[data-status='AWAITING_APPROVAL'] {
+  border-color: var(--state-approval-border);
+  background: var(--state-approval-surface);
+  color: var(--state-approval-text);
+}
+
+.pill[data-status='ROLLED_BACK'] {
+  border-color: var(--state-failed-border);
+  background: var(--state-failed-surface);
+  color: var(--state-failed-text);
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.875rem;
+}
+
+.card__head h2 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-surface);
+  font-size: 0.875rem;
+}
+
+.alert__close {
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: inherit;
+}
+
+/* --- graph trace ------------------------------------------------------- */
+
+.trace {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.node {
+  border: 2px solid var(--state-pending-border);
+  background: var(--state-pending-surface);
+  color: var(--state-pending-text);
+  border-radius: 0.625rem;
+  padding: 0.75rem;
+  /* Colour is the live signal in this view, so the change should be visible but not distracting. */
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease;
+}
+
+.node[data-state='RUNNING'] {
+  border-color: var(--state-running-border);
+  background: var(--state-running-surface);
+  color: var(--state-running-text);
+}
+
+.node[data-state='COMPLETED'] {
+  border-color: var(--state-completed-border);
+  background: var(--state-completed-surface);
+  color: var(--state-completed-text);
+}
+
+.node[data-state='AWAITING_APPROVAL'] {
+  border-color: var(--state-approval-border);
+  background: var(--state-approval-surface);
+  color: var(--state-approval-text);
+}
+
+.node[data-state='FAILED'] {
+  border-color: var(--state-failed-border);
+  background: var(--state-failed-surface);
+  color: var(--state-failed-text);
+}
+
+.node__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.node__name {
+  font-weight: 700;
+  font-size: 0.9375rem;
+}
+
+.node__flag {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.0625rem 0.3125rem;
+  border-radius: 0.25rem;
+  border: 1px solid currentColor;
+}
+
+.node__state {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-top: 0.125rem;
+  opacity: 0.85;
+}
+
+.node__meta {
+  display: grid;
+  gap: 0.125rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+}
+
+.node__meta > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.node__meta dt {
+  opacity: 0.75;
+}
+
+.node__meta dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.node__gate,
+.node__error {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  padding-top: 0.375rem;
+  border-top: 1px solid currentColor;
+  opacity: 0.85;
+}
+
+.trace__legend {
+  margin-top: 0.875rem;
+}
+
+/* --- action gates ------------------------------------------------------ */
+
+.gates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.gate h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
+}
+
+.gate__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.gate__field {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 8rem;
+}
+
+.gate__field input,
+.gate__field select {
+  font: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  width: 100%;
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.5rem;
+}
+
+.gate__field input:focus-visible,
+.gate__field select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.button {
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button--ghost {
+  background: transparent;
+  color: inherit;
+  border-color: var(--color-border);
+  font-weight: 500;
+}
+
+.button--danger {
+  background: transparent;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  font-weight: 500;
+}
+
+/* --- telemetry --------------------------------------------------------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.stat {
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.stat dt {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stat dd {
+  margin: 0.125rem 0 0;
+  font-size: 1.375rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.4375rem 0.625rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table th {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- lineage ledger ---------------------------------------------------- */
+
+.ledger {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 22rem;
+  overflow-y: auto;
+  font-size: 0.8125rem;
+}
+
+.ledger__row {
+  display: grid;
+  grid-template-columns: 3.5rem 6rem 11rem 1fr;
+  gap: 0.5rem;
+  padding: 0.3125rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ledger__row:last-child {
+  border-bottom: none;
+}
+
+.ledger__seq,
+.ledger__at {
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger__event {
+  font-weight: 700;
+  font-size: 0.6875rem;
+  letter-spacing: 0.03em;
+  align-self: center;
+}
+
+.ledger__transition {
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 48rem) {
+  .ledger__row {
+    grid-template-columns: 3rem 5rem 1fr;
+  }
+
+  .ledger__message {
+    grid-column: 1 / -1;
+  }
+}

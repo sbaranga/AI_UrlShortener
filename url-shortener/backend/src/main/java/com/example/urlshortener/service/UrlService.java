@@ -1,6 +1,7 @@
 package com.example.urlshortener.service;
 
 import com.example.urlshortener.config.AppProperties;
+import com.example.urlshortener.dto.AnalyticsSummary;
 import com.example.urlshortener.dto.PageResponse;
 import com.example.urlshortener.dto.ShortenRequest;
 import com.example.urlshortener.dto.UrlResponse;
@@ -88,6 +89,21 @@ public class UrlService {
     public PageResponse<UrlResponse> list(Pageable pageable) {
         Page<UrlMapping> page = repository.findAllByOrderByCreatedAtDescIdDesc(pageable);
         return PageResponse.from(page, mapping -> UrlResponse.from(mapping, properties.getBaseUrl()));
+    }
+
+    /** Aggregates for the dashboard, computed over every link rather than the current page. */
+    @Transactional(readOnly = true)
+    public AnalyticsSummary summary() {
+        long totalLinks = repository.count();
+        long expiredLinks = repository.countByExpiresAtBefore(Instant.now());
+        UrlResponse mostClicked = repository
+                .findFirstByOrderByClickCountDescIdDesc()
+                // An untouched link is not a meaningful "busiest link", so report none.
+                .filter(mapping -> mapping.getClickCount() > 0)
+                .map(mapping -> UrlResponse.from(mapping, properties.getBaseUrl()))
+                .orElse(null);
+        return new AnalyticsSummary(
+                totalLinks, repository.sumClickCounts(), totalLinks - expiredLinks, expiredLinks, mostClicked);
     }
 
     @Transactional

@@ -42,7 +42,7 @@ class UrlControllerApiTest {
 
     @Test
     void shortenReturnsACreatedLink() throws Exception {
-        String body = mockMvc.perform(post("/api/urls")
+        String body = mockMvc.perform(post("/api/v1/shorten")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://example.com/a/very/long/path?q=1\"}"))
                 .andExpect(status().isCreated())
@@ -61,7 +61,7 @@ class UrlControllerApiTest {
 
     @Test
     void shortenHonoursACustomAlias() throws Exception {
-        mockMvc.perform(post("/api/urls")
+        mockMvc.perform(post("/api/v1/shorten")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://example.com\",\"customAlias\":\"my-link\"}"))
                 .andExpect(status().isCreated())
@@ -73,7 +73,7 @@ class UrlControllerApiTest {
     void shortenRejectsAnAliasThatIsAlreadyTaken() throws Exception {
         createLink("https://example.com", "taken");
 
-        mockMvc.perform(post("/api/urls")
+        mockMvc.perform(post("/api/v1/shorten")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://other.example\",\"customAlias\":\"taken\"}"))
                 .andExpect(status().isConflict())
@@ -82,7 +82,7 @@ class UrlControllerApiTest {
 
     @Test
     void shortenRejectsAReservedAlias() throws Exception {
-        mockMvc.perform(post("/api/urls")
+        mockMvc.perform(post("/api/v1/shorten")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"https://example.com\",\"customAlias\":\"api\"}"))
                 .andExpect(status().isBadRequest());
@@ -90,7 +90,7 @@ class UrlControllerApiTest {
 
     @Test
     void shortenRejectsNonHttpSchemes() throws Exception {
-        mockMvc.perform(post("/api/urls")
+        mockMvc.perform(post("/api/v1/shorten")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"javascript:alert(1)\"}"))
                 .andExpect(status().isBadRequest())
@@ -99,7 +99,7 @@ class UrlControllerApiTest {
 
     @Test
     void shortenRejectsAMissingUrl() throws Exception {
-        mockMvc.perform(post("/api/urls").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        mockMvc.perform(post("/api/v1/shorten").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.url").exists());
     }
@@ -113,7 +113,7 @@ class UrlControllerApiTest {
                 .andExpect(header().string("Location", "https://example.com/docs"))
                 .andExpect(header().string("Cache-Control", "no-store"));
 
-        mockMvc.perform(get("/api/urls/go-docs")).andExpect(jsonPath("$.clickCount").value(1));
+        mockMvc.perform(get("/api/v1/urls/go-docs")).andExpect(jsonPath("$.clickCount").value(1));
     }
 
     @Test
@@ -133,15 +133,15 @@ class UrlControllerApiTest {
 
     @Test
     void statsReturnsNotFoundForAnUnknownCode() throws Exception {
-        mockMvc.perform(get("/api/urls/nosuch1")).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/urls/nosuch1")).andExpect(status().isNotFound());
     }
 
     @Test
-    void listReturnsNewestFirst() throws Exception {
+    void analyticsReturnsNewestFirst() throws Exception {
         createLink("https://first.example", "first1");
         createLink("https://second.example", "second1");
 
-        mockMvc.perform(get("/api/urls").param("size", "10"))
+        mockMvc.perform(get("/api/v1/analytics").param("size", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalItems").value(2))
                 .andExpect(jsonPath("$.items[0].shortCode").value("second1"))
@@ -149,16 +149,74 @@ class UrlControllerApiTest {
     }
 
     @Test
+    void analyticsPagesTheResults() throws Exception {
+        createLink("https://first.example", "first1");
+        createLink("https://second.example", "second1");
+        createLink("https://third.example", "third1");
+
+        mockMvc.perform(get("/api/v1/analytics").param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalItems").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].shortCode").value("first1"));
+    }
+
+    @Test
+    void summaryIsEmptyWhenThereAreNoLinks() throws Exception {
+        mockMvc.perform(get("/api/v1/analytics/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalLinks").value(0))
+                .andExpect(jsonPath("$.totalClicks").value(0))
+                .andExpect(jsonPath("$.mostClicked").doesNotExist());
+    }
+
+    @Test
+    void summaryAggregatesClicksAcrossEveryLink() throws Exception {
+        createLink("https://busy.example", "busy01");
+        createLink("https://quiet.example", "quiet1");
+
+        mockMvc.perform(get("/busy01")).andExpect(status().isFound());
+        mockMvc.perform(get("/busy01")).andExpect(status().isFound());
+        mockMvc.perform(get("/quiet1")).andExpect(status().isFound());
+
+        mockMvc.perform(get("/api/v1/analytics/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalLinks").value(2))
+                .andExpect(jsonPath("$.totalClicks").value(3))
+                .andExpect(jsonPath("$.activeLinks").value(2))
+                .andExpect(jsonPath("$.expiredLinks").value(0))
+                .andExpect(jsonPath("$.mostClicked.shortCode").value("busy01"))
+                .andExpect(jsonPath("$.mostClicked.clickCount").value(2));
+    }
+
+    @Test
+    void summaryCountsAnExpiredLinkSeparatelyFromActiveOnes() throws Exception {
+        createLink("https://example.com", "active1");
+        Instant now = Instant.now();
+        repository.saveAndFlush(
+                new UrlMapping("expired", "https://example.com", now.minusSeconds(120), now.minusSeconds(60)));
+
+        mockMvc.perform(get("/api/v1/analytics/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalLinks").value(2))
+                .andExpect(jsonPath("$.activeLinks").value(1))
+                .andExpect(jsonPath("$.expiredLinks").value(1));
+    }
+
+    @Test
     void deleteRemovesTheLink() throws Exception {
         createLink("https://example.com", "delete-me");
 
-        mockMvc.perform(delete("/api/urls/delete-me")).andExpect(status().isNoContent());
-        mockMvc.perform(get("/api/urls/delete-me")).andExpect(status().isNotFound());
-        mockMvc.perform(delete("/api/urls/delete-me")).andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/v1/urls/delete-me")).andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/urls/delete-me")).andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/v1/urls/delete-me")).andExpect(status().isNotFound());
     }
 
     private void createLink(String url, String alias) throws Exception {
-        mockMvc.perform(post("/api/urls")
+        mockMvc.perform(post("/api/v1/shorten")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"" + url + "\",\"customAlias\":\"" + alias + "\"}"))
                 .andExpect(status().isCreated());

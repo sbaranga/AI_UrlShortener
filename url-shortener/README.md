@@ -3,6 +3,12 @@
 Spring Boot API plus an Angular front end. Paste a long URL, get a short one, and see how many
 times each link has been followed.
 
+Two screens:
+
+- **`/`** — the shortener and its analytics dashboard.
+- **`/governance`** — a control room for the SDLC orchestration engine that models the delivery of
+  this service as a six-module pipeline. See [Orchestration engine](#orchestration-engine).
+
 ## Layout
 
 ```
@@ -37,24 +43,25 @@ the tables while it runs at http://localhost:8080/h2-console using the JDBC URL 
 ## Tests
 
 ```
-cd backend  && mvn test      # 34 tests: JUnit 5 + MockMvc
-cd frontend && npm test      # 6 tests: vitest + HttpTestingController
+cd backend  && mvn test      # 67 tests: JUnit 5 + MockMvc
+cd frontend && npm test      # 34 tests: vitest + HttpTestingController
 ```
 
 ## API
 
-| Method   | Path                  | Purpose                                     |
-| -------- | --------------------- | ------------------------------------------- |
-| `POST`   | `/api/urls`           | Create a short link (`201`)                 |
-| `GET`    | `/api/urls`           | List links, newest first (`?page=&size=`)   |
-| `GET`    | `/api/urls/{code}`    | Link details and click count                |
-| `DELETE` | `/api/urls/{code}`    | Delete a link (`204`)                       |
-| `GET`    | `/{code}`             | Redirect to the target (`302`) and count it |
+| Method   | Path                          | Purpose                                     |
+| -------- | ----------------------------- | ------------------------------------------- |
+| `POST`   | `/api/v1/shorten`             | Create a short link (`201`)                 |
+| `GET`    | `/api/v1/analytics`           | List links, newest first (`?page=&size=`)   |
+| `GET`    | `/api/v1/analytics/summary`   | Totals across every link                    |
+| `GET`    | `/api/v1/urls/{code}`         | Link details and click count                |
+| `DELETE` | `/api/v1/urls/{code}`         | Delete a link (`204`)                       |
+| `GET`    | `/{code}`                     | Redirect to the target (`302`) and count it |
 
 Create a link:
 
 ```
-curl -X POST http://localhost:8080/api/urls \
+curl -X POST http://localhost:8080/api/v1/shorten \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://example.com/a/very/long/path","customAlias":"demo","expiresInDays":30}'
 ```
@@ -96,6 +103,47 @@ Errors come back as JSON with the matching status:
   service and clicks keep being counted.
 - **Rate limiting is a per-IP token bucket** over `/api/**` only; redirects are never limited.
 
+## Orchestration engine
+
+The `/governance` screen drives a stateful workflow engine that models delivering this service as
+six pipeline modules. The routing is a DAG rather than a list:
+
+```
+Requirements -> Architecture -+-> Implementation --+
+                              |                    +-> [barrier] Testing -> Release Readiness
+                              +-> Documentation ---+                          (human approval)
+```
+
+Implementation and Documentation are dispatched together onto a worker pool, so they run
+concurrently; Testing has two incoming edges and is held by an explicit synchronization barrier
+until both channels arrive. Governance controls:
+
+- **Bounded retries** — three attempts per module, then the run gives up.
+- **Automated rollback** — on the third failure the engine halts anything still in flight and
+  restores the checkpoint taken before the current stage. The offending module stays `FAILED` so the
+  grid still shows where it broke; a manual step resumes from the restored checkpoint.
+- **Human approval** — Release Readiness parks at `AWAITING_APPROVAL` until a verification key is
+  posted. The key is never written to the ledger, only the fact that one was accepted and by whom.
+- **Lineage** — every dispatch, transition, retry, barrier wait and rollback is appended to a
+  bounded, sequence-numbered ledger that survives a reset.
+
+| Method | Path                                    | Purpose                                     |
+| ------ | --------------------------------------- | ------------------------------------------- |
+| `GET`  | `/api/v1/orchestration/state`           | Whole graph, barrier, gate and telemetry    |
+| `GET`  | `/api/v1/orchestration/lineage`         | Ledger records, oldest first (`?limit=`)    |
+| `POST` | `/api/v1/orchestration/start`           | Start a run (`409` if one is in progress)   |
+| `POST` | `/api/v1/orchestration/step`            | Manual step; resumes after a rollback       |
+| `POST` | `/api/v1/orchestration/failures/{mod}`  | Arm an anomaly (`?persistent=true`)         |
+| `POST` | `/api/v1/orchestration/approve`         | Process the verification key                |
+| `POST` | `/api/v1/orchestration/reset`           | Return every module to `PENDING`            |
+
+Module work is simulated: `app.orchestration.module-latency-ms` stands in for real delivery effort,
+since there is nothing to actually compile here. State lives in the one JVM, so a second replica
+would run its own independent pipeline.
+
+To watch a rollback: **Start run**, pick a module, press **Force rollback**, then
+**Resume from checkpoint**.
+
 ## Configuration
 
 All keys live in `backend/src/main/resources/application.properties`.
@@ -107,8 +155,12 @@ All keys live in `backend/src/main/resources/application.properties`.
 | `app.max-code-attempts`            | `5`                     | Retries on a code collision              |
 | `app.allowed-origins`              | `http://localhost:4200` | CORS origins for `/api/**`               |
 | `app.rate-limit.enabled`           | `true`                  |                                          |
-| `app.rate-limit.capacity`          | `30`                    | Burst size per client                    |
-| `app.rate-limit.refill-per-minute` | `30`                    | Sustained requests per minute per client |
+| `app.rate-limit.capacity`          | `120`                   | Burst size per client                    |
+| `app.rate-limit.refill-per-minute` | `120`                   | Sustained requests per minute per client |
+| `app.orchestration.max-attempts`   | `3`                     | Attempts per module before rollback      |
+| `app.orchestration.module-latency-ms` | `900`                | Simulated work per module attempt        |
+| `app.orchestration.worker-threads` | `4`                     | Pool the parallel channels run on        |
+| `app.orchestration.ledger-capacity` | `500`                  | Lineage records retained                 |
 
 ## Before using this for real
 
@@ -124,3 +176,7 @@ The defaults are tuned for running on a laptop. For anything public:
   link. There is no notion of an owner on `UrlMapping` yet.
 - **Decide about untrusted targets.** Any public `http(s)` URL is accepted as-is, with no
   safe-browsing or malware check.
+- **Persist the orchestration state.** The engine and its ledger are in-memory singletons, so a
+  restart loses the run and its audit trail, and a second replica would not share either. Real
+  audit-grade lineage needs a durable store, and the approval gate needs authentication so the
+  verification key means something.

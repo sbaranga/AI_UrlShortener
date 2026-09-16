@@ -1,0 +1,283 @@
+<main class="room">
+  <header class="room__header">
+    <div>
+      <h1>Delivery Governance</h1>
+      <p class="muted">
+        Agentic SDLC orchestration for the URL Shortener delivery, with audit-grade lineage.
+      </p>
+    </div>
+    <div class="room__run">
+      <span class="pill" [attr.data-status]="status()">{{ status() }}</span>
+      @if (state(); as current) {
+        <span class="muted">Run {{ current.runId }}</span>
+      }
+      @if (lastUpdated(); as updated) {
+        <span class="muted">Updated {{ updated | date: 'mediumTime' }}</span>
+      }
+      @if (live()) {
+        <span class="muted live">Live</span>
+      }
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="alert" role="alert">
+      <span>{{ error() }}</span>
+      <button type="button" class="alert__close" (click)="dismissError()" aria-label="Dismiss">&times;</button>
+    </div>
+  }
+
+  @if (state(); as current) {
+    <!-- 1. Visual graph trace view -->
+    <section class="card">
+      <div class="card__head">
+        <h2>Graph trace</h2>
+        <button type="button" class="button button--ghost" (click)="refresh()" [disabled]="busy()">
+          Refresh
+        </button>
+      </div>
+
+      <ol class="trace">
+        @for (node of nodes(); track node.id) {
+          <li
+            class="node"
+            [attr.data-state]="node.state"
+            [attr.aria-label]="node.name + ' is ' + node.state"
+          >
+            <div class="node__head">
+              <span class="node__name">{{ node.name }}</span>
+              @if (isArmed(node.id)) {
+                <span class="node__flag" title="A simulated anomaly is armed for this module">armed</span>
+              }
+            </div>
+            <span class="node__state">{{ node.state }}</span>
+            <dl class="node__meta">
+              <div>
+                <dt>Channel</dt>
+                <dd>{{ node.channel }}{{ isParallel(node) ? ' (parallel)' : '' }}</dd>
+              </div>
+              <div>
+                <dt>Attempts</dt>
+                <dd>{{ node.attempts }} / {{ node.maxAttempts }}</dd>
+              </div>
+              <div>
+                <dt>Latency</dt>
+                <dd>{{ node.lastDurationMs }}ms</dd>
+              </div>
+            </dl>
+            @if (node.join) {
+              <p class="node__gate">
+                Barrier: {{ current.barrier.open ? 'open' : 'waiting on ' + current.barrier.waitingOn.join(', ') }}
+              </p>
+            }
+            @if (node.approvalGate) {
+              <p class="node__gate">Human approval gate</p>
+            }
+            @if (node.lastError) {
+              <p class="node__error">{{ node.lastError }}</p>
+            }
+          </li>
+        }
+      </ol>
+
+      <p class="muted trace__legend">
+        Requirements &rarr; Architecture forks into the build and docs channels, which rejoin at the
+        Testing barrier before the release gate. Checkpoint held before: {{ current.checkpoint }}.
+      </p>
+    </section>
+
+    <!-- 4. Action gates -->
+    <section class="card">
+      <div class="card__head">
+        <h2>Action gates</h2>
+      </div>
+
+      <div class="gates">
+        <div class="gate">
+          <h3>Execution</h3>
+          <div class="gate__row">
+            <button type="button" class="button" (click)="start()" [disabled]="busy() || !canStart()">
+              Start run
+            </button>
+            <button
+              type="button"
+              class="button button--ghost"
+              (click)="step()"
+              [disabled]="busy() || !canStep()"
+            >
+              {{ status() === 'ROLLED_BACK' ? 'Resume from checkpoint' : 'Manual step' }}
+            </button>
+            <button type="button" class="button button--ghost" (click)="reset()" [disabled]="busy()">
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div class="gate">
+          <h3>Simulate failure</h3>
+          <div class="gate__row">
+            <label class="gate__field">
+              <span class="visually-hidden">Module</span>
+              <select [value]="selectedModule()" (change)="selectModule($event)" [disabled]="busy()">
+                @for (node of nodes(); track node.id) {
+                  <option [value]="node.id">{{ node.name }}</option>
+                }
+              </select>
+            </label>
+            <button
+              type="button"
+              class="button button--ghost"
+              (click)="armTransientFailure()"
+              [disabled]="busy()"
+              title="Fails one attempt; the bounded retry recovers it"
+            >
+              Transient
+            </button>
+            <button
+              type="button"
+              class="button button--danger"
+              (click)="armPersistentFailure()"
+              [disabled]="busy()"
+              title="Fails every attempt; exhausts the retry budget and forces a rollback"
+            >
+              Force rollback
+            </button>
+          </div>
+          @if (current.armedFailures.length > 0) {
+            <p class="muted">Armed: {{ current.armedFailures.join(', ') }}</p>
+          }
+        </div>
+
+        <div class="gate">
+          <h3>Human approval</h3>
+          <div class="gate__row">
+            <label class="gate__field">
+              <span class="visually-hidden">Verification key</span>
+              <input
+                type="text"
+                name="verificationKey"
+                placeholder="Verification key"
+                autocomplete="off"
+                [(ngModel)]="verificationKey"
+                [disabled]="busy() || !approvalPending()"
+              />
+            </label>
+            <label class="gate__field">
+              <span class="visually-hidden">Approver</span>
+              <input
+                type="text"
+                name="approver"
+                placeholder="Approver (optional)"
+                autocomplete="off"
+                [(ngModel)]="approver"
+                [disabled]="busy() || !approvalPending()"
+              />
+            </label>
+            <button
+              type="button"
+              class="button"
+              (click)="approve()"
+              [disabled]="busy() || !approvalPending()"
+            >
+              Authorize release
+            </button>
+          </div>
+          <p class="muted">
+            {{
+              approvalPending()
+                ? current.approval.moduleName + ' is blocked until a key is processed.'
+                : 'No approval is pending.'
+            }}
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Telemetry performance dashboard -->
+    <section class="card">
+      <div class="card__head">
+        <h2>Telemetry</h2>
+      </div>
+
+      <dl class="stats">
+        <div class="stat">
+          <dt>Success rate</dt>
+          <dd>{{ successPercent() }}%</dd>
+        </div>
+        <div class="stat">
+          <dt>Attempts</dt>
+          <dd>{{ current.telemetry.totalAttempts }}</dd>
+        </div>
+        <div class="stat">
+          <dt>Retries</dt>
+          <dd>{{ current.telemetry.totalRetries }}</dd>
+        </div>
+        <div class="stat">
+          <dt>Failures</dt>
+          <dd>{{ current.telemetry.totalFailures }}</dd>
+        </div>
+        <div class="stat">
+          <dt>Total latency</dt>
+          <dd>{{ current.telemetry.totalLatencyMs | number }}ms</dd>
+        </div>
+      </dl>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Module</th>
+            <th scope="col" class="numeric">Attempts</th>
+            <th scope="col" class="numeric">Retries</th>
+            <th scope="col" class="numeric">Failures</th>
+            <th scope="col" class="numeric">Last</th>
+            <th scope="col" class="numeric">Average</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (module of current.telemetry.modules; track module.module) {
+            <tr>
+              <td>{{ module.displayName }}</td>
+              <td class="numeric">{{ module.attempts }}</td>
+              <td class="numeric">{{ module.retries }}</td>
+              <td class="numeric">{{ module.failures }}</td>
+              <td class="numeric">{{ module.lastLatencyMs }}ms</td>
+              <td class="numeric">{{ module.averageLatencyMs }}ms</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 3. Lineage ledger -->
+    <section class="card">
+      <div class="card__head">
+        <h2>Lineage ledger</h2>
+        <span class="muted">{{ lineage().length }} records</span>
+      </div>
+
+      @if (lineage().length === 0) {
+        <p class="muted">No records yet. Start a run to populate the ledger.</p>
+      } @else {
+        <ol class="ledger">
+          @for (entry of lineage(); track entry.seq) {
+            <li class="ledger__row">
+              <span class="ledger__seq">#{{ entry.seq }}</span>
+              <span class="ledger__at">{{ entry.at | date: 'HH:mm:ss.SSS' }}</span>
+              <span class="ledger__event">{{ entry.event }}</span>
+              <span class="ledger__message">
+                {{ entry.message }}
+                @if (entry.from && entry.to && entry.from !== entry.to) {
+                  <span class="ledger__transition">{{ entry.from }} &rarr; {{ entry.to }}</span>
+                }
+              </span>
+            </li>
+          }
+        </ol>
+      }
+    </section>
+  } @else {
+    <section class="card">
+      <p class="muted">Loading the orchestration state...</p>
+    </section>
+  }
+</main>

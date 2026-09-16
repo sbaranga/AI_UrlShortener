@@ -28,5 +28,3 @@ Build a single-screen Governance and Audit Control Room containing:
 ## 🏁 Output Execution Rules
 1. Provide comprehensive Java backend and Angular frontend files. No shortcuts, mock stubs, or design omissions.
 2. Ensure explicit wiring between the frontend components and the backend REST Controller.
-Use code with caution.
-
