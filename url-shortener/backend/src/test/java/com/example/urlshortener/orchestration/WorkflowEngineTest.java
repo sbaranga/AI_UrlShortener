@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.urlshortener.exception.ApiException;
+import com.example.urlshortener.orchestration.ai.AiProperties;
+import com.example.urlshortener.orchestration.ai.AiProvider;
+import com.example.urlshortener.orchestration.ai.AiTask;
 import com.example.urlshortener.orchestration.LineageLedger.LineageEntry;
 import com.example.urlshortener.orchestration.dto.NodeView;
 import com.example.urlshortener.orchestration.dto.OrchestrationState;
@@ -417,5 +420,27 @@ class WorkflowEngineTest {
 
         assertThat(bounded.entries()).hasSize(10);
         assertThat(bounded.entries().get(9).message()).isEqualTo("entry 24");
+    }
+
+    @Test
+    void enabledAiProviderRunsForEachDispatchedModule() {
+        OrchestrationProperties orchestrationProperties = new OrchestrationProperties();
+        orchestrationProperties.setModuleLatencyMs(0);
+        AiProperties aiProperties = new AiProperties();
+        aiProperties.setEnabled(true);
+        List<AiTask> tasks = new java.util.ArrayList<>();
+        AiProvider provider = tasks::add;
+        WorkflowEngine aiEngine = new WorkflowEngine(
+                orchestrationProperties, ledger, telemetry, executor, provider, aiProperties);
+
+        aiEngine.start();
+        executor.drain();
+
+        assertThat(tasks).extracting(AiTask::module).containsExactly(
+                ModuleId.REQUIREMENTS,
+                ModuleId.ARCHITECTURE,
+                ModuleId.IMPLEMENTATION,
+                ModuleId.DOCUMENTATION,
+                ModuleId.TESTING);
     }
 }

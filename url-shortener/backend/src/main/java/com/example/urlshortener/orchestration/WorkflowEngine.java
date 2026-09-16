@@ -1,6 +1,9 @@
 package com.example.urlshortener.orchestration;
 
 import com.example.urlshortener.exception.ApiException;
+import com.example.urlshortener.orchestration.ai.AiProvider;
+import com.example.urlshortener.orchestration.ai.AiProperties;
+import com.example.urlshortener.orchestration.ai.AiTask;
 import com.example.urlshortener.orchestration.dto.ApprovalView;
 import com.example.urlshortener.orchestration.dto.NodeView;
 import com.example.urlshortener.orchestration.dto.OrchestrationState;
@@ -21,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.locks.ReentrantLock;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -43,6 +47,8 @@ public class WorkflowEngine {
     private final LineageLedger ledger;
     private final TelemetryRecorder telemetry;
     private final Executor executor;
+    private final AiProvider aiProvider;
+    private final AiProperties aiProperties;
 
     private final ReentrantLock lock = new ReentrantLock();
     private final SecureRandom random = new SecureRandom();
@@ -63,10 +69,23 @@ public class WorkflowEngine {
             LineageLedger ledger,
             TelemetryRecorder telemetry,
             Executor orchestrationExecutor) {
+        this(properties, ledger, telemetry, orchestrationExecutor, task -> {}, new AiProperties());
+    }
+
+    @Autowired
+    public WorkflowEngine(
+            OrchestrationProperties properties,
+            LineageLedger ledger,
+            TelemetryRecorder telemetry,
+            Executor orchestrationExecutor,
+            AiProvider aiProvider,
+            AiProperties aiProperties) {
         this.properties = properties;
         this.ledger = ledger;
         this.telemetry = telemetry;
         this.executor = orchestrationExecutor;
+        this.aiProvider = aiProvider;
+        this.aiProperties = aiProperties;
     }
 
     // ---------------------------------------------------------------- commands
@@ -291,24 +310,37 @@ public class WorkflowEngine {
 
         ModuleId id = node.id();
         long dispatchedGeneration = generation;
-        executor.execute(() -> runModule(id, dispatchedGeneration));
+        String dispatchedRunId = runId;
+        int attempt = node.attempts();
+        executor.execute(() -> runModule(id, dispatchedGeneration, dispatchedRunId, attempt));
     }
 
-    /** Runs on a worker thread: simulates the module's work, then hands the outcome back. */
-    private void runModule(ModuleId id, long dispatchedGeneration) {
-        long latency = properties.getModuleLatencyMs();
-        if (latency > 0) {
-            try {
-                Thread.sleep(latency);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                return;
+    /** Runs a simulated or AI-backed module, then hands the outcome back to the state machine. */
+    private void runModule(ModuleId id, long dispatchedGeneration, String dispatchedRunId, int attempt) {
+        try {
+            if (aiProperties.isEnabled()) {
+                aiProvider.execute(new AiTask(dispatchedRunId, id, attempt));
+            } else {
+                long latency = properties.getModuleLatencyMs();
+                if (latency > 0) {
+                    Thread.sleep(latency);
+                }
             }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return;
+        } catch (RuntimeException failure) {
+            settle(id, dispatchedGeneration, "AI module failed: " + failure.getMessage());
+            return;
         }
         settle(id, dispatchedGeneration);
     }
 
     private void settle(ModuleId id, long dispatchedGeneration) {
+        settle(id, dispatchedGeneration, null);
+    }
+
+    private void settle(ModuleId id, long dispatchedGeneration, String failure) {
         lock.lock();
         try {
             // A rollback or reset moved the run on; this result is stale and must not be applied.
@@ -317,6 +349,10 @@ public class WorkflowEngine {
             }
             WorkflowNode node = graph.node(id);
             if (node.state() != NodeState.RUNNING) {
+                return;
+            }
+            if (failure != null) {
+                failAttempt(node, failure);
                 return;
             }
             Boolean persistent = armedFailures.get(id);

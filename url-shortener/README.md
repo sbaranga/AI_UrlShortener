@@ -215,9 +215,14 @@ until both channels arrive. Governance controls:
 | `POST` | `/api/v1/orchestration/approve`         | Process the verification key                |
 | `POST` | `/api/v1/orchestration/reset`           | Return every module to `PENDING`            |
 
-Module work is simulated: `app.orchestration.module-latency-ms` stands in for real delivery effort,
-since there is nothing to actually compile here. State lives in the one JVM, so a second replica
-would run its own independent pipeline.
+By default, module work is simulated: `app.orchestration.module-latency-ms` stands in for real
+delivery effort. The engine can optionally call an OpenAI-compatible chat-completions endpoint for
+each non-approval module attempt. Set `app.orchestration.ai.enabled=true` and provide
+`APP_ORCHESTRATION_AI_API_KEY`; configure `app.orchestration.ai.endpoint` for another compatible
+provider. Provider failures use the normal bounded retry and rollback behavior. The current AI task
+receives the run ID, module, and attempt and is instructed to return a result without modifying
+files or deploying anything; generated output is not yet applied to the repository. State lives in
+the one JVM, so a second replica would run its own independent pipeline.
 
 To watch a rollback: **Start run**, pick a module, press **Force rollback**, then
 **Resume from checkpoint**.
@@ -245,6 +250,10 @@ All keys live in `backend/src/main/resources/application.properties`.
 | `app.orchestration.module-latency-ms` | `900`                | Simulated work per module attempt        |
 | `app.orchestration.worker-threads` | `4`                     | Pool the parallel channels run on        |
 | `app.orchestration.ledger-capacity` | `500`                  | Lineage records retained                 |
+| `app.orchestration.ai.enabled` | `false` | Call the configured AI provider for module work |
+| `app.orchestration.ai.endpoint` | OpenAI chat completions | OpenAI-compatible endpoint |
+| `app.orchestration.ai.model` | `gpt-4o-mini` | Model sent to the provider |
+| `app.orchestration.ai.timeout-seconds` | `60` | Per-request timeout |
 
 ## Before using this for real
 
