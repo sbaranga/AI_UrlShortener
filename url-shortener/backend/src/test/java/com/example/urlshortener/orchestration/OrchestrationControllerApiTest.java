@@ -2,6 +2,7 @@ package com.example.urlshortener.orchestration;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,6 +14,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 /**
  * Drives the engine through the real HTTP surface. {@code module-latency-ms=0} keeps the modules
@@ -32,9 +34,13 @@ class OrchestrationControllerApiTest {
     @Autowired
     private MockMvc mockMvc;
 
+        private MockHttpServletRequestBuilder command(String path) {
+                return post(path).with(httpBasic("admin", "change-me"));
+        }
+
     @BeforeEach
     void resetEngine() throws Exception {
-        mockMvc.perform(post(BASE + "/reset")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/reset")).andExpect(status().isOk());
     }
 
     /**
@@ -70,6 +76,11 @@ class OrchestrationControllerApiTest {
                 .andExpect(jsonPath("$.approval.pending").value(false));
     }
 
+        @Test
+        void governanceCommandsRequireAuthentication() throws Exception {
+                mockMvc.perform(post(BASE + "/start")).andExpect(status().isUnauthorized());
+        }
+
     @Test
     void exposesTheForkAndTheBarrierInTheGraphDefinition() throws Exception {
         mockMvc.perform(get(BASE + "/state"))
@@ -87,7 +98,7 @@ class OrchestrationControllerApiTest {
 
     @Test
     void runsToTheApprovalGateAndStopsThere() throws Exception {
-        mockMvc.perform(post(BASE + "/start"))
+        mockMvc.perform(command(BASE + "/start"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RUNNING"))
                 .andExpect(jsonPath("$.runId").value(Matchers.not("none")));
@@ -104,16 +115,16 @@ class OrchestrationControllerApiTest {
 
     @Test
     void approvalRequiresAVerificationKey() throws Exception {
-        mockMvc.perform(post(BASE + "/start")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
         awaitStatus("AWAITING_APPROVAL");
 
-        mockMvc.perform(post(BASE + "/approve")
+        mockMvc.perform(command(BASE + "/approve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"approver\":\"sbaranga\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.verificationKey").exists());
 
-        mockMvc.perform(post(BASE + "/approve")
+        mockMvc.perform(command(BASE + "/approve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"verificationKey\":\"RELEASE-1\",\"approver\":\"sbaranga\"}"))
                 .andExpect(status().isOk());
@@ -128,7 +139,7 @@ class OrchestrationControllerApiTest {
 
     @Test
     void approvingWithNothingPendingIsRejected() throws Exception {
-        mockMvc.perform(post(BASE + "/approve")
+        mockMvc.perform(command(BASE + "/approve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"verificationKey\":\"RELEASE-1\"}"))
                 .andExpect(status().isBadRequest())
@@ -137,23 +148,23 @@ class OrchestrationControllerApiTest {
 
     @Test
     void startingTwiceIsAConflict() throws Exception {
-        mockMvc.perform(post(BASE + "/start")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
 
         // The first run is either still going or parked at the gate; both refuse a second start.
-        mockMvc.perform(post(BASE + "/start"))
+        mockMvc.perform(command(BASE + "/start"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409));
     }
 
     @Test
     void aPersistentAnomalyRollsTheRunBackAndAStepResumesIt() throws Exception {
-        mockMvc.perform(post(BASE + "/start")).andExpect(status().isOk());
-        mockMvc.perform(post(BASE + "/failures/RELEASE_READINESS").param("persistent", "true"))
+        mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/failures/RELEASE_READINESS").param("persistent", "true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.armedFailures").value(Matchers.contains("RELEASE_READINESS")));
 
         awaitStatus("AWAITING_APPROVAL");
-        mockMvc.perform(post(BASE + "/approve")
+        mockMvc.perform(command(BASE + "/approve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"verificationKey\":\"RELEASE-1\"}"))
                 .andExpect(status().isOk());
@@ -166,9 +177,9 @@ class OrchestrationControllerApiTest {
                 .andExpect(jsonPath("$.telemetry.totalFailures").value(3));
 
         // The rollback cleared the armed anomaly, so resuming now gets through.
-        mockMvc.perform(post(BASE + "/step")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/step")).andExpect(status().isOk());
         awaitStatus("AWAITING_APPROVAL");
-        mockMvc.perform(post(BASE + "/approve")
+        mockMvc.perform(command(BASE + "/approve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"verificationKey\":\"RELEASE-2\"}"))
                 .andExpect(status().isOk());
@@ -177,19 +188,19 @@ class OrchestrationControllerApiTest {
 
     @Test
     void injectingAFailureBeforeStartingIsRejected() throws Exception {
-        mockMvc.perform(post(BASE + "/failures/TESTING"))
+        mockMvc.perform(command(BASE + "/failures/TESTING"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(Matchers.containsString("Start the run")));
     }
 
     @Test
     void anUnknownModuleIsRejected() throws Exception {
-        mockMvc.perform(post(BASE + "/failures/NOT_A_MODULE")).andExpect(status().isBadRequest());
+        mockMvc.perform(command(BASE + "/failures/NOT_A_MODULE")).andExpect(status().isBadRequest());
     }
 
     @Test
     void lineageRecordsTheRunChronologically() throws Exception {
-        mockMvc.perform(post(BASE + "/start")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
         awaitStatus("AWAITING_APPROVAL");
 
         mockMvc.perform(get(BASE + "/lineage"))
@@ -208,7 +219,7 @@ class OrchestrationControllerApiTest {
 
     @Test
     void lineageLimitIsClampedToASaneRange() throws Exception {
-        mockMvc.perform(post(BASE + "/start")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
         awaitStatus("AWAITING_APPROVAL");
 
         mockMvc.perform(get(BASE + "/lineage").param("limit", "2"))
@@ -221,10 +232,10 @@ class OrchestrationControllerApiTest {
 
     @Test
     void resetReturnsEveryModuleToPending() throws Exception {
-        mockMvc.perform(post(BASE + "/start")).andExpect(status().isOk());
+        mockMvc.perform(command(BASE + "/start")).andExpect(status().isOk());
         awaitStatus("AWAITING_APPROVAL");
 
-        mockMvc.perform(post(BASE + "/reset"))
+        mockMvc.perform(command(BASE + "/reset"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("IDLE"))
                 .andExpect(jsonPath("$.runId").value("none"))

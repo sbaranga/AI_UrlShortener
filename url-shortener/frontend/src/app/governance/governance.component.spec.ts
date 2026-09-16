@@ -33,6 +33,8 @@ describe('GovernanceComponent', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    let promptCall = 0;
+    vi.spyOn(window, 'prompt').mockImplementation(() => (++promptCall % 2 === 1 ? 'admin' : 'change-me'));
     TestBed.configureTestingModule({
       imports: [GovernanceComponent],
       providers: [provideHttpClient(), provideHttpClientTesting()],
@@ -44,6 +46,7 @@ describe('GovernanceComponent', () => {
 
   afterEach(() => {
     http.verify();
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 

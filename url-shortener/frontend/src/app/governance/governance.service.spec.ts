@@ -45,28 +45,29 @@ describe('GovernanceService', () => {
   });
 
   it('posts the execution commands with no body', () => {
-    service.start().subscribe();
+    service.start('admin', 'change-me').subscribe();
     const start = http.expectOne(`${BASE}/start`);
     expect(start.request.method).toBe('POST');
+    expect(start.request.headers.get('Authorization')).toBe(`Basic ${btoa('admin:change-me')}`);
     expect(start.request.body).toBeNull();
     start.flush(idleState());
 
-    service.step().subscribe();
+    service.step('admin', 'change-me').subscribe();
     http.expectOne(`${BASE}/step`).flush(idleState());
 
-    service.reset().subscribe();
+    service.reset('admin', 'change-me').subscribe();
     http.expectOne(`${BASE}/reset`).flush(idleState());
 
     http.verify();
   });
 
   it('distinguishes a transient anomaly from a persistent one', () => {
-    service.injectFailure('IMPLEMENTATION', false).subscribe();
+    service.injectFailure('IMPLEMENTATION', false, 'admin', 'change-me').subscribe();
     const transient = http.expectOne((c) => c.url === `${BASE}/failures/IMPLEMENTATION`);
     expect(transient.request.params.get('persistent')).toBe('false');
     transient.flush(idleState());
 
-    service.injectFailure('TESTING', true).subscribe();
+    service.injectFailure('TESTING', true, 'admin', 'change-me').subscribe();
     const persistent = http.expectOne((c) => c.url === `${BASE}/failures/TESTING`);
     expect(persistent.request.params.get('persistent')).toBe('true');
     persistent.flush(idleState());
@@ -75,7 +76,7 @@ describe('GovernanceService', () => {
   });
 
   it('sends the verification key and approver when authorising', () => {
-    service.approve('RELEASE-1', 'sbaranga').subscribe();
+    service.approve('RELEASE-1', 'sbaranga', 'admin', 'change-me').subscribe();
 
     const request = http.expectOne(`${BASE}/approve`);
     expect(request.request.body).toEqual({ verificationKey: 'RELEASE-1', approver: 'sbaranga' });
@@ -86,7 +87,7 @@ describe('GovernanceService', () => {
 
   it('surfaces the API error message', () => {
     let message: string | undefined;
-    service.step().subscribe({ error: (error: Error) => (message = error.message) });
+    service.step('admin', 'change-me').subscribe({ error: (error: Error) => (message = error.message) });
 
     http
       .expectOne(`${BASE}/step`)

@@ -23,6 +23,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.POST, "/api/v1/shorten").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/urls/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/orchestration/**").authenticated()
                         .anyRequest()
                         .permitAll())
                 .httpBasic(httpBasic -> {})

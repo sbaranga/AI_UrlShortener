@@ -72,25 +72,29 @@ export class GovernanceComponent {
   }
 
   start(): void {
-    this.run(this.governance.start());
+    this.withCredentials((username, password) => this.run(this.governance.start(username, password)));
   }
 
   step(): void {
-    this.run(this.governance.step());
+    this.withCredentials((username, password) => this.run(this.governance.step(username, password)));
   }
 
   reset(): void {
-    this.run(this.governance.reset());
+    this.withCredentials((username, password) => this.run(this.governance.reset(username, password)));
   }
 
   /** Fails one attempt, so the bounded retry is seen recovering the module. */
   armTransientFailure(): void {
-    this.run(this.governance.injectFailure(this.selectedModule(), false));
+    this.withCredentials((username, password) =>
+      this.run(this.governance.injectFailure(this.selectedModule(), false, username, password)),
+    );
   }
 
   /** Fails every attempt, so the retry budget is exhausted and the rollback runs. */
   armPersistentFailure(): void {
-    this.run(this.governance.injectFailure(this.selectedModule(), true));
+    this.withCredentials((username, password) =>
+      this.run(this.governance.injectFailure(this.selectedModule(), true, username, password)),
+    );
   }
 
   approve(): void {
@@ -98,7 +102,9 @@ export class GovernanceComponent {
       this.error.set('Enter a verification key to release the gate.');
       return;
     }
-    this.run(this.governance.approve(this.verificationKey.trim(), this.approver.trim()));
+    this.withCredentials((username, password) =>
+      this.run(this.governance.approve(this.verificationKey.trim(), this.approver.trim(), username, password)),
+    );
     this.verificationKey = '';
   }
 
@@ -147,5 +153,17 @@ export class GovernanceComponent {
   private applyState(state: OrchestrationState): void {
     this.state.set(state);
     this.lastUpdated.set(new Date());
+  }
+
+  private withCredentials(action: (username: string, password: string) => void): void {
+    const username = window.prompt('Username required for governance actions:');
+    if (username === null) {
+      return;
+    }
+    const password = window.prompt('Password required for governance actions:');
+    if (password === null) {
+      return;
+    }
+    action(username, password);
   }
 }

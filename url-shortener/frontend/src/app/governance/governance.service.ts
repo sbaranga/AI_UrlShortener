@@ -105,40 +105,54 @@ export class GovernanceService {
       .pipe(catchError(toReadableError));
   }
 
-  start(): Observable<OrchestrationState> {
-    return this.command('start');
+  start(username: string, password: string): Observable<OrchestrationState> {
+    return this.command('start', username, password);
   }
 
   /** Manual execution step; also resumes a run that has been rolled back. */
-  step(): Observable<OrchestrationState> {
-    return this.command('step');
+  step(username: string, password: string): Observable<OrchestrationState> {
+    return this.command('step', username, password);
   }
 
-  reset(): Observable<OrchestrationState> {
-    return this.command('reset');
+  reset(username: string, password: string): Observable<OrchestrationState> {
+    return this.command('reset', username, password);
   }
 
   /**
    * @param persistent false fails one attempt so the retry recovers it, true fails every attempt
    *     and drives the automated rollback
    */
-  injectFailure(module: ModuleId, persistent: boolean): Observable<OrchestrationState> {
+  injectFailure(module: ModuleId, persistent: boolean, username: string, password: string): Observable<OrchestrationState> {
     return this.http
       .post<OrchestrationState>(`${this.api}/failures/${module}`, null, {
         params: { persistent },
+        headers: this.authorization(username, password),
       })
       .pipe(catchError(toReadableError));
   }
 
-  approve(verificationKey: string, approver: string): Observable<OrchestrationState> {
+  approve(
+    verificationKey: string,
+    approver: string,
+    username: string,
+    password: string,
+  ): Observable<OrchestrationState> {
     return this.http
-      .post<OrchestrationState>(`${this.api}/approve`, { verificationKey, approver })
+      .post<OrchestrationState>(`${this.api}/approve`, { verificationKey, approver }, {
+        headers: this.authorization(username, password),
+      })
       .pipe(catchError(toReadableError));
   }
 
-  private command(path: string): Observable<OrchestrationState> {
+  private command(path: string, username: string, password: string): Observable<OrchestrationState> {
     return this.http
-      .post<OrchestrationState>(`${this.api}/${path}`, null)
+      .post<OrchestrationState>(`${this.api}/${path}`, null, {
+        headers: this.authorization(username, password),
+      })
       .pipe(catchError(toReadableError));
+  }
+
+  private authorization(username: string, password: string): { Authorization: string } {
+    return { Authorization: `Basic ${btoa(`${username}:${password}`)}` };
   }
 }

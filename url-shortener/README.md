@@ -53,7 +53,8 @@ flowchart TB
   browser -->|GET /:code| urlController
   security -->|public reads and redirects| urlController
   security -->|authenticated create/delete| urlController
-  security -->|public orchestration API| orchestrationController
+  security -->|public orchestration reads| orchestrationController
+  security -->|authenticated orchestration commands| orchestrationController
 
   urlController --> urlService
   urlService --> repository
@@ -91,9 +92,9 @@ The backend uses Redis at `localhost:6379` to cache short-code redirects. Start 
 the cache, or run without it: Redis failures fall back to H2 so the application remains usable.
 Cached entries expire with the link, and click counts are still written to H2 for every redirect.
 
-Creating and deleting links require HTTP Basic authentication. The local defaults are `admin` /
-`change-me`; override `app.auth.username` and `app.auth.password` before exposing the service. The
-backend persists a `url_audit_event` row after every successful create or delete, including the
+Creating and deleting links, and all governance commands, require HTTP Basic authentication. The
+local defaults are `admin` / `change-me`; override `app.auth.username` and `app.auth.password` before
+exposing the service. The backend persists a `url_audit_event` row after every successful create or delete, including the
 authenticated username as `user_id`, the action, short code, and timestamp. It also writes a
 structured `URL_ACTIVITY` log entry. Redirects and read-only analytics remain public.
 
